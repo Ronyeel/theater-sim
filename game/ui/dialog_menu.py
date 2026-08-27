@@ -7,7 +7,7 @@ import math
 from typing import Callable, Any
 from game.settings import (
     C_PANEL_BG, C_PANEL_BORDER, C_TEXT_WHITE, C_TEXT_GOLD, C_TEXT_DIM,
-    C_BTN_BG, C_BTN_HOVER, C_BTN_ACTIVE, C_GOOD, SCREEN_W, SCREEN_H,
+    C_BTN_BG, C_BTN_HOVER, C_BTN_ACTIVE, C_GOOD, C_BAD, SCREEN_W, SCREEN_H,
     MOVIES, CONCESSION_ITEMS
 )
 
@@ -173,10 +173,12 @@ class ConcessionDialog(DialogMenu):
 
 class UsherDialog:
     """Special non-selectable dialog just for the scanning animation."""
-    def __init__(self, on_complete: Callable[[], None]):
+    def __init__(self, on_complete: Callable[[], None], on_rejected: Callable[[], None]):
         self.on_complete = on_complete
+        self.on_rejected = on_rejected
         self.active = False
         self._t = 0.0
+        self.ticket_is_valid = False
         
         self.font_lg = _font(28, bold=True)
         self.font_sm = _font(16)
@@ -184,9 +186,10 @@ class UsherDialog:
         self.width = 300
         self.height = 200
         
-    def open(self):
+    def open(self, ticket_is_valid: bool):
         self.active = True
         self._t = 0.0
+        self.ticket_is_valid = ticket_is_valid
         
     def close(self):
         self.active = False
@@ -195,7 +198,10 @@ class UsherDialog:
         if not self.active: return
         self._t += dt
         if self._t >= 2.0: # Scan takes 2 seconds
-            self.on_complete()
+            if self.ticket_is_valid:
+                self.on_complete()
+            else:
+                self.on_rejected()
             self.close()
             
     def handle_event(self, event):
@@ -212,8 +218,12 @@ class UsherDialog:
         pygame.draw.rect(panel, C_PANEL_BORDER, panel.get_rect(), 2, border_radius=12)
         
         # Text
-        msg = "Scanning Ticket..." if self._t < 1.5 else "Ticket Valid!"
-        color = C_TEXT_WHITE if self._t < 1.5 else C_GOOD
+        if self._t < 1.5:
+            msg, color = "Scanning Ticket...", C_TEXT_WHITE
+        elif self.ticket_is_valid:
+            msg, color = "Ticket Valid!", C_GOOD
+        else:
+            msg, color = "No Ticket Found!", C_BAD
         
         msg_surf = self.font_lg.render(msg, True, color)
         panel.blit(msg_surf, (self.width//2 - msg_surf.get_width()//2, 40))
@@ -230,9 +240,11 @@ class UsherDialog:
             # Scanning progress
             pct = min(1.0, self._t / 1.5)
             pygame.draw.rect(panel, C_TEXT_GOLD, (bx, by, int(bar_w * pct), bar_h), border_radius=10)
-        else:
+        elif self.ticket_is_valid:
             # Done
             pygame.draw.rect(panel, C_GOOD, (bx, by, bar_w, bar_h), border_radius=10)
+        else:
+            pygame.draw.rect(panel, C_BAD, (bx, by, bar_w, bar_h), border_radius=10)
             
         rect = panel.get_rect(center=(SCREEN_W//2, SCREEN_H//2))
         overlay.blit(panel, rect)

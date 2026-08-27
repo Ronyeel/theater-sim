@@ -118,6 +118,10 @@ TILE_CORRIDOR   = 16   # dark corridor floor — walkable
 # ── Spawn & key tile positions (col, row) for 20×25 map ───────────────────
 PLAYER_SPAWN    = (10, 22)    # lobby entrance area (bottom)
 
+# Auditorium entry is ticket-only.  These are the four doors on row 7.
+AUDITORIUM_DOOR_COLS = [8, 9, 10, 11]
+AUDITORIUM_DOOR_ROW  = 7
+
 # Ticket area (row 17-18)
 CASHIER_DESK_ROW    = 17
 CASHIER_DESK_COLS   = [4, 7, 10, 13]            # up to 4 cashiers
@@ -126,6 +130,7 @@ CASHIER_QUEUE_ROW   = 18                         # queue ropes in front (below d
 # Usher checkpoint (row 14)
 USHER_DESK_ROW      = 14
 USHER_DESK_COLS     = [7, 12]
+USHER_GATE_COLS     = list(range(1, MAP_COLS - 1))  # invisible checkpoint barrier
 
 # Concession (row 11)
 SNACK_DESK_ROW      = 11
@@ -137,6 +142,10 @@ CORRIDOR_ROW        = 8
 # Seating (rows 3-6)
 SEAT_ROWS           = [3, 4, 5, 6]
 SEAT_COLS           = list(range(2, 18))
+
+# Main exit (bottom-center doors)
+EXIT_DOOR_COLS      = [9, 10]
+EXIT_DOOR_ROW       = 24
 
 # Security desk (visual only)
 SECURITY_COL        = 3

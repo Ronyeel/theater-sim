@@ -8,6 +8,8 @@ import math
 from game.settings import (
     TILE_SIZE, PLAYER_SPEED, PLAYER_SPRITE_W, PLAYER_SPRITE_H,
     INTERACT_RADIUS, INTERACT_HOLD_TIME, PLAYER_SPAWN,
+    AUDITORIUM_DOOR_COLS, AUDITORIUM_DOOR_ROW,
+    USHER_DESK_ROW, USHER_GATE_COLS,
     C_NEON_GOLD, C_NEON_GREEN,
 )
 from game.core import asset_loader as AL
@@ -25,6 +27,7 @@ class Stage:
     FOOD_SKIP     = "food_skip"
     NEED_SEAT     = "need_seat"
     SEATED        = "seated"
+    NEED_EXIT     = "need_exit"
 
 
 # ── Direction indices for sprite ──────────────────────────────────────────
@@ -74,6 +77,9 @@ class Player:
 
         # Footstep dust timer
         self.dust_timer = 0.0
+        self.ticket_gate_blocked = False
+        self.usher_gate_blocked = False
+        self.usher_no_ticket_notified = False
 
     # ── Properties ───────────────────────────────────────────────────────
 
@@ -97,7 +103,7 @@ class Player:
     # ── Input ─────────────────────────────────────────────────────────────
 
     def handle_keys(self, keys):
-        if self._interacting or self.stage == Stage.SEATED:
+        if self._interacting:
             self._vx = 0.0; self._vy = 0.0
             return
         dx = dy = 0
@@ -141,6 +147,8 @@ class Player:
             return
 
         # Movement + collision
+        self.ticket_gate_blocked = False
+        self.usher_gate_blocked = False
         new_x = self.x + self._vx * dt
         new_y = self.y + self._vy * dt
 
@@ -150,6 +158,14 @@ class Player:
         def passable(px, py):
             col = int(px) // TILE_SIZE
             row = int(py) // TILE_SIZE
+            if (row == AUDITORIUM_DOOR_ROW and col in AUDITORIUM_DOOR_COLS
+                    and not self.has_ticket):
+                self.ticket_gate_blocked = True
+                return False
+            if (row == USHER_DESK_ROW and col in USHER_GATE_COLS
+                    and not self.ticket_checked):
+                self.usher_gate_blocked = True
+                return False
             return is_walkable(col, row)
 
         if passable(new_x - hw + 2, self.y) and passable(new_x + hw - 2, self.y):
