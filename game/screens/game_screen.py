@@ -68,6 +68,7 @@ class SimpleHUD:
             Stage.FOOD_SKIP:  ("🪑 Find a Seat",         C_NEON_CYAN),
             Stage.NEED_SEAT:  ("🪑 Find a Seat",         C_NEON_CYAN),
             Stage.SEATED:     ("✅ Enjoy the Movie!",    C_NEON_GREEN),
+            Stage.NEED_EXIT:  ("🚪 Movie's Over — Find the Exit", C_NEON_RED),
         }
         lbl, col = stage_labels.get(self.player.stage, ("", C_NEON_GOLD))
         if lbl:
@@ -128,13 +129,14 @@ class GameScreen:
         self.active_dialog = None
         self.ticket_dialog = TicketDialog(self._on_ticket_selected)
         self.snack_dialog  = ConcessionDialog(self._on_snack_selected)
-        self.usher_dialog  = UsherDialog(self._on_usher_complete)
+        self.usher_dialog  = UsherDialog(self._on_usher_complete, self._on_usher_rejected)
 
         # Fade to title
         self._fading     = False
         self._fade_alpha = 0
         self._fade_surf  = pygame.Surface((SCREEN_W, SCREEN_H))
         self._fade_surf.fill((0, 0, 0))
+        self._ticket_gate_hint_timer = 0.0
 
     # ── Player Interaction ────────────────────────────────────────────────
 
@@ -143,15 +145,15 @@ class GameScreen:
             self._dialog_prompt.hide()
             return
         p = self.player
-        if p.is_interacting or p.stage == Stage.SEATED:
+        if p.is_interacting:
             self._dialog_prompt.hide()
             return
 
         needed = None
         if p.stage in (Stage.ENTERING, Stage.NEED_TICKET): needed = "cashier"
-        elif p.stage == Stage.NEED_CHECK:                  needed = "usher"
         elif p.stage == Stage.NEED_FOOD:                   needed = "snack"
         elif p.stage in (Stage.NEED_SEAT, Stage.FOOD_SKIP): needed = "seat"
+        elif p.stage == Stage.NEED_EXIT:                   needed = "exit"
 
         zone = find_nearest_zone(self.zones, p.x, p.y)
         if zone and (zone.name in ["poster", "board", "security"] or zone.name == needed):
@@ -163,7 +165,7 @@ class GameScreen:
         if self.active_dialog:
             return
         p = self.player
-        if p.is_interacting or p.stage == Stage.SEATED:
+        if p.is_interacting:
             return
 
         zone = find_nearest_zone(self.zones, p.x, p.y)
@@ -173,9 +175,9 @@ class GameScreen:
         can_interact = (
             zone.name in ["poster", "board", "security"]
             or (p.stage in (Stage.ENTERING, Stage.NEED_TICKET) and zone.name == "cashier")
-            or (p.stage == Stage.NEED_CHECK  and zone.name == "usher")
             or (p.stage == Stage.NEED_FOOD   and zone.name == "snack")
             or (p.stage in (Stage.NEED_SEAT, Stage.FOOD_SKIP) and zone.name == "seat")
+            or (p.stage == Stage.NEED_EXIT and zone.name == "exit")
         )
         if not can_interact:
             self.hud.add_log(f"Can't do that yet!", C_BAD)
@@ -185,14 +187,13 @@ class GameScreen:
             if zone.name == "cashier":
                 self.ticket_dialog.open()
                 self.active_dialog = self.ticket_dialog
-            elif zone.name == "usher":
-                self.usher_dialog.open()
-                self.active_dialog = self.usher_dialog
             elif zone.name == "snack":
                 self.snack_dialog.open()
                 self.active_dialog = self.snack_dialog
             elif zone.name == "seat":
                 self._on_seat_taken(zone)
+            elif zone.name == "exit":
+                self._on_exit_used()
             elif zone.name == "security":
                 self.bubbles.append(SpeechBubble("All clear! Move along.", p.x, p.y-40, C_NEON_GOLD))
             elif zone.name == "board":
@@ -207,6 +208,7 @@ class GameScreen:
     def _on_ticket_selected(self, item):
         self.active_dialog = None
         self.player.has_ticket = True
+        self.player.usher_no_ticket_notified = False
         self.player.selected_movie = item["title"]
         self.player.stage = Stage.NEED_CHECK
         self.player.flash(C_NEON_GOLD)
@@ -228,6 +230,25 @@ class GameScreen:
         self.particles.burst(self.player.x, self.player.y - 20, C_NEON_PINK, 8)
         self.hud.add_log("Ticket checked by usher!", C_NEON_PINK)
 
+    def _on_usher_rejected(self):
+        self.active_dialog = None
+        self.player.stage = Stage.NEED_TICKET
+        self.player.flash(C_BAD)
+        self.hud.add_log("No ticket found — visit the box office first.", C_BAD)
+
+    def _start_automatic_ticket_check(self):
+        """Start the usher's scan as soon as a ticket-holder reaches the gate."""
+        p = self.player
+        if (p.stage not in (Stage.ENTERING, Stage.NEED_TICKET, Stage.NEED_CHECK)
+                or self.active_dialog or p.is_interacting or p.ticket_checked):
+            return
+        if (find_nearest_zone(self.zones, p.x, p.y, "usher")
+                and (p.has_ticket or not p.usher_no_ticket_notified)):
+            self.usher_dialog.open(p.has_ticket)
+            self.active_dialog = self.usher_dialog
+            if not p.has_ticket:
+                p.usher_no_ticket_notified = True
+
     def _on_snack_selected(self, item):
         self.active_dialog = None
         if item["name"] != "No Thanks":
@@ -244,7 +265,7 @@ class GameScreen:
 
     def _on_seat_taken(self, zone):
         p = self.player
-        p.stage = Stage.SEATED
+        p.stage = Stage.NEED_EXIT
         p.seated_at_pos = (p.x, p.y)
         p.wait_time = time.time() - p.arrival_time
         p.flash(C_NEON_GREEN)
@@ -254,7 +275,14 @@ class GameScreen:
         self.bubbles.append(SpeechBubble(
             f"Seated! Wait: {wm}m {ws:02d}s", p.x, p.y - 40, C_NEON_GREEN, 4.0))
         self.hud.add_log(f"Seated! Real wait: {wm}m {ws:02d}s", C_NEON_GREEN)
-        # Start fading back to title after a short delay
+        self.bubbles.append(SpeechBubble(
+            "Movie's over — head to the exit!", p.x, p.y - 62, C_NEON_RED, 4.0))
+
+    def _on_exit_used(self):
+        p = self.player
+        p.flash(C_NEON_RED)
+        self.particles.burst(p.x, p.y - 20, C_NEON_RED, 18)
+        self.hud.add_log("Thanks for visiting CinePlex Dreams!", C_NEON_RED)
         self._fading = True
 
     # ── Main Loop ─────────────────────────────────────────────────────────
@@ -278,6 +306,16 @@ class GameScreen:
             keys = pygame.key.get_pressed()
             self.player.handle_keys(keys)
         self.player.update(dt)
+        self._start_automatic_ticket_check()
+        self._ticket_gate_hint_timer = max(0.0, self._ticket_gate_hint_timer - dt)
+        if self.player.ticket_gate_blocked and self._ticket_gate_hint_timer == 0:
+            self.hud.add_log("Ticket required to enter the auditorium!", C_BAD)
+            self.bubbles.append(SpeechBubble(
+                "Ticket required!", self.player.x, self.player.y - 40, C_BAD, 2.0))
+            self._ticket_gate_hint_timer = 1.5
+        if self.player.usher_gate_blocked and self._ticket_gate_hint_timer == 0:
+            self.hud.add_log("Please have an usher check your ticket.", C_BAD)
+            self._ticket_gate_hint_timer = 1.5
 
         # Camera
         self.camera.update(self.player.x, self.player.y, dt)
@@ -339,9 +377,9 @@ class GameScreen:
         p = self.player
         needed = None
         if p.stage in (Stage.ENTERING, Stage.NEED_TICKET): needed = "cashier"
-        elif p.stage == Stage.NEED_CHECK:                  needed = "usher"
         elif p.stage == Stage.NEED_FOOD:                   needed = "snack"
         elif p.stage in (Stage.NEED_SEAT, Stage.FOOD_SKIP): needed = "seat"
+        elif p.stage == Stage.NEED_EXIT:                   needed = "exit"
         for z in self.zones:
             if z.name == needed or z.name in ["poster", "security", "board"]:
                 z.draw_glow(surface, self.camera)

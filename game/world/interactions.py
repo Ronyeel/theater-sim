@@ -6,11 +6,11 @@ a zone and presses E, a callback fires to advance their journey stage.
 import pygame
 import math
 from game.settings import (
-    TILE_SIZE, INTERACT_RADIUS, C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN,
+    TILE_SIZE, INTERACT_RADIUS, C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN, C_NEON_RED,
     C_SECURITY, C_WALL_TRIM, CASHIER_DESK_COLS, USHER_DESK_COLS, 
     SNACK_DESK_COLS, SEAT_ROWS, SEAT_COLS,
     CASHIER_QUEUE_ROW, USHER_DESK_ROW, SNACK_DESK_ROW, 
-    SECURITY_COL, SECURITY_ROW, BOARD_COL, BOARD_ROW
+    SECURITY_COL, SECURITY_ROW, BOARD_COL, BOARD_ROW, EXIT_DOOR_COLS, EXIT_DOOR_ROW
 )
 
 
@@ -76,7 +76,9 @@ def build_zones(num_cashiers: int, num_ushers: int, num_servers: int) -> list[Zo
     # Usher zones
     for i in range(min(num_ushers, len(USHER_DESK_COLS))):
         col = USHER_DESK_COLS[i]
-        x, y = _tc(col, USHER_DESK_ROW - 1)
+        # The player approaches from below, so the auto-scan range belongs
+        # on the lobby-facing side of the checkpoint barrier.
+        x, y = _tc(col, USHER_DESK_ROW + 1)
         zones.append(Zone("usher", x, y, C_NEON_PINK, "[E] Show Ticket"))
 
     # Snack bar zones
@@ -90,6 +92,11 @@ def build_zones(num_cashiers: int, num_ushers: int, num_servers: int) -> list[Zo
         for col in range(SEAT_COLS[0], SEAT_COLS[-1], 2):
             x, y = _tc(col, row)
             zones.append(Zone("seat", x, y, C_NEON_GOLD, "[E] Take Seat"))
+
+    # Bottom-center doors — the route out after the movie.
+    exit_col = sum(EXIT_DOOR_COLS) // len(EXIT_DOOR_COLS)
+    x, y = _tc(exit_col, EXIT_DOOR_ROW)
+    zones.append(Zone("exit", x, y, C_NEON_RED, "[E] Exit Theater"))
 
     return zones
 

@@ -56,8 +56,8 @@ WALKABLE = {TILE_FLOOR, TILE_CARPET, TILE_SEAT, TILE_DOOR, TILE_QUEUE, TILE_CORR
 #   Row 20   : Lobby open
 #   Row 21   : Lobby (security, tables, board)
 #   Row 22   : Lobby open
-#   Row 23   : Neon marquee strip
-#   Row 24   : Bottom wall + entrance
+#   Row 23   : Neon marquee strip + exit passage
+#   Row 24   : Bottom wall + exit doors
 
 THEATER_MAP = [
     # Row 0: Top wall
@@ -106,9 +106,9 @@ THEATER_MAP = [
     [W, F, F,SE, F, F, F, F, T, F, F, T, F, F, F, P, P, F, F, W],
     # Row 22: Lobby open
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 23: Neon marquee strip
-    [W, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, N, W],
-    # Row 24: Bottom wall + Entrance
+    # Row 23: Neon marquee strip + exit passage
+    [W, N, N, N, N, N, N, N, N,DR,DR, N, N, N, N, N, N, N, N, W],
+    # Row 24: Bottom wall + exit doors
     [W, W, W, W, W, W, W, W, W,DR,DR, W, W, W, W, W, W, W, W, W],
 ]
 
