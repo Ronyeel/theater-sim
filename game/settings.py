@@ -194,3 +194,5 @@ SCENARIOS = {
         "runtime": 60,
     },
 }
+
+TILE_RED_CARPET = 17
