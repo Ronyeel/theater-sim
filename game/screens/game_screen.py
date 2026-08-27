@@ -6,6 +6,7 @@ particles, speech bubbles, and dialogs.
 import pygame
 import random
 import time
+import math
 from game.settings import (
     SCREEN_W, SCREEN_H, TILE_SIZE,
     C_BG_DARK, C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN,
@@ -87,7 +88,7 @@ class SimpleHUD:
                 surface.blit(s, (12, SCREEN_H - 24 - i * 18))
 
         # Controls hint (bottom-right)
-        hint = self._lf.render("[E] Interact  [ESC] Quit", True, (120, 100, 160))
+        hint = self._lf.render("[E] Interact  [+/-] Zoom  [ESC] Quit", True, (120, 100, 160))
         surface.blit(hint, (SCREEN_W - hint.get_width() - 10, SCREEN_H - 20))
 
 
@@ -101,6 +102,7 @@ class GameScreen:
         # Camera & world
         self.camera  = Camera()
         self.tilemap = TileMap()
+        self._world_surface = pygame.Surface((SCREEN_W, SCREEN_H))
 
         # Player
         self.player = Player()
@@ -240,10 +242,11 @@ class GameScreen:
             return
         if (find_nearest_zone(self.zones, p.x, p.y, "usher")
                 and (p.has_ticket or not p.usher_no_ticket_notified)):
-            self.usher_dialog.open(p.has_ticket)
-            self.active_dialog = self.usher_dialog
-            if not p.has_ticket:
+            if p.has_ticket:
+                self._on_usher_complete()
+            else:
                 p.usher_no_ticket_notified = True
+                self._on_usher_rejected()
 
     def _on_snack_selected(self, item):
         self.active_dialog = None
@@ -291,8 +294,15 @@ class GameScreen:
             return
 
         self.hud.handle_event(evt)
-        if evt.type == pygame.KEYDOWN and evt.key == pygame.K_e:
-            self._try_interact()
+        if evt.type == pygame.KEYDOWN:
+            if evt.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                self.camera.adjust_zoom(0.1)
+            elif evt.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                self.camera.adjust_zoom(-0.1)
+            elif evt.key == pygame.K_e:
+                self._try_interact()
+        elif evt.type == pygame.MOUSEWHEEL:
+            self.camera.adjust_zoom(0.1 * evt.y)
 
     def update(self, dt):
         self._t += dt
@@ -359,11 +369,24 @@ class GameScreen:
             self.player.dust_timer = 0
             self.particles.sparkle(self.player.x, self.player.y + 10)
 
+    def _draw_exterior(self, surface):
+        """Plain backdrop visible around the theater when zoomed out."""
+        surface.fill((7, 12, 28))
+
     def draw(self, surface):
-        surface.fill(C_BG_DARK)
+        # Render the larger world view first, then fit it to the display.
+        # This is a true camera zoom: zooming out increases the visible area.
+        view_size = (
+            math.ceil(SCREEN_W / self.camera.zoom),
+            math.ceil(SCREEN_H / self.camera.zoom),
+        )
+        if self._world_surface.get_size() != view_size:
+            self._world_surface = pygame.Surface(view_size)
+        world = self._world_surface
+        self._draw_exterior(world)
 
         # Tilemap
-        self.tilemap.draw(surface, self.camera)
+        self.tilemap.draw(world, self.camera)
 
         # Zone glows
         p = self.player
@@ -374,21 +397,23 @@ class GameScreen:
         elif p.stage == Stage.NEED_EXIT:                   needed = "exit"
         for z in self.zones:
             if z.name == needed or z.name in ["poster", "security", "board"]:
-                z.draw_glow(surface, self.camera)
+                z.draw_glow(world, self.camera)
 
         # Staff
         for staff in self.staff:
-            staff.draw(surface, self.camera)
+            staff.draw(world, self.camera)
 
         # Player
-        self.player.draw(surface, self.camera)
+        self.player.draw(world, self.camera)
 
         # Particles
-        self.particles.draw(surface, self.camera)
+        self.particles.draw(world, self.camera)
 
         # Speech bubbles
         for b in self.bubbles:
-            b.draw(surface, self.camera)
+            b.draw(world, self.camera)
+
+        surface.blit(pygame.transform.smoothscale(world, (SCREEN_W, SCREEN_H)), (0, 0))
 
         # UI overlays
         if self.active_dialog:
