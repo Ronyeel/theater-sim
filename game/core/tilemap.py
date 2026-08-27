@@ -75,11 +75,11 @@ THEATER_MAP = [
     # Row 6: Seat row 4
     [W, C, S, S, S, S, S, S, C, C, C, C, S, S, S, S, S, S, C, W],
     # Row 7: Theater entrance doors
-    [W, W, W, W, W,DR,DR,DR,DR,DR,DR,DR,DR,DR,DR, W, W, W, W, W],
+    [W, W, W, W, W,W,W,W,DR,DR,DR,DR, W, W, W, W, W, W, W, W],
     # Row 8: Cinema corridor
     [W,CR,CR, P,CR,CR,CR,CR,CR,CR,CR,CR,CR,CR,CR,CR, P,CR,CR, W],
     # Row 9: Behind concession (wall)
-    [W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W],
+    [W, W, W, W, W, W, F, F, W, W, F, F, W, W, W, W, W, W, W, W],
     # Row 10: Snack counters
     [W, W, W, W,SN,SN, F, F,SN,SN, F, F,SN,SN, W, W, W, W, W, W],
     # Row 11: Snack queue area
@@ -167,18 +167,35 @@ class TileMap:
                     dy = sy - (surf.get_height() - TILE_SIZE)
                     surface.blit(surf, (sx, dy))
 
-                # Animated neon flicker on neon tiles
+                # ── Animated effects ──────────────────────────────────
+
+                # Neon marquee flicker
                 if tile_id == TILE_NEON:
                     flicker = 0.6 + 0.4 * math.sin(self._anim_t * 4.0 + col * 0.7)
                     glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
                     glow.fill((*C_NEON_PINK[:3], int(30 * flicker)))
                     surface.blit(glow, (sx, sy))
 
-                # Screen glow
+                # Cinema screen glow — pulsing blue/white light
                 if tile_id == TILE_SCREEN:
                     glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-                    pulse = int(15 + 10 * math.sin(self._anim_t * 1.5))
+                    pulse = int(20 + 15 * math.sin(self._anim_t * 1.5))
                     glow.fill((*C_NEON_CYAN[:3], pulse))
+                    surface.blit(glow, (sx, sy))
+
+                # Theater seat area — subtle darkness to simulate dim auditorium
+                if tile_id == TILE_SEAT:
+                    dim = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    dim.fill((0, 0, 0, 18))
+                    surface.blit(dim, (sx, sy))
+
+                # Carpet aisle glow — faint warm light from screen
+                if tile_id == TILE_CARPET and 1 <= row <= 6:
+                    # Gradient: brighter closer to screen (row 1)
+                    dist = (row - 1) / 5.0
+                    alpha = int(12 * (1 - dist) + 4 * math.sin(self._anim_t * 1.2))
+                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    glow.fill((100, 160, 220, max(0, alpha)))
                     surface.blit(glow, (sx, sy))
 
                 # Poster spotlight
@@ -187,3 +204,11 @@ class TileMap:
                     pulse = int(8 + 6 * math.sin(self._anim_t * 2.0 + col * 1.3))
                     glow.fill((*C_NEON_GOLD[:3], pulse))
                     surface.blit(glow, (sx, sy))
+
+                # Corridor floor — faint edge lighting
+                if tile_id == TILE_CORRIDOR:
+                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    a = int(6 + 4 * math.sin(self._anim_t * 0.8 + col * 0.5))
+                    glow.fill((80, 50, 120, a))
+                    surface.blit(glow, (sx, sy))
+

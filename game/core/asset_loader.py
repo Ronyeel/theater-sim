@@ -57,16 +57,35 @@ def get_tileset_sheet() -> pygame.Surface | None:
     return None
 
 
-def _slice_tileset_tile(col: int, row: int, key_out_bg: bool = False, base_surf: pygame.Surface | None = None) -> pygame.Surface | None:
+# Hand-tuned bounding boxes for each sprite in tileset.jpg (1024×1024)
+# Row 0 (top): floor, carpet, wall, counter/desk, ornate door
+# Row 1 (bottom): cinema seat, CINEMA neon sign, queue ropes, snack stand, screen TV
+_TILESET_RECTS = {
+    # (col, row): (x, y, w, h) in the 1024×1024 image
+    (0, 0): (  0, 307, 204, 205),   # checkered floor
+    (1, 0): (204, 307, 205, 205),   # plush carpet
+    (2, 0): (409, 307, 204, 205),   # brick wall
+    (3, 0): (600, 307, 225, 205),   # counter + register
+    (4, 0): (830, 307, 190, 205),   # ornate door
+    (0, 1): (  0, 527, 170, 195),   # red cinema seat
+    (1, 1): (170, 527, 220, 175),   # CINEMA neon sign
+    (2, 1): (390, 527, 175, 195),   # queue ropes
+    (3, 1): (560, 527, 260, 195),   # snack stand + items
+    (4, 1): (830, 527, 190, 195),   # screen TV
+}
+
+
+def _slice_tileset_tile(col: int, row: int, key_out_bg: bool = False,
+                        base_surf: pygame.Surface | None = None,
+                        target_w: int = TILE_SIZE,
+                        target_h: int = TILE_SIZE) -> pygame.Surface | None:
     sheet = get_tileset_sheet()
     if not sheet:
         return None
-    sw, sh = sheet.get_size()
-    # 5 columns, 2 rows centered in the tileset image
-    x = int(col * (sw / 5.0))
-    w = int((col + 1) * (sw / 5.0)) - x
-    y = int(307 * (sh / 1024.0)) if row == 0 else int(512 * (sh / 1024.0))
-    h = int(205 * (sh / 1024.0))
+    rect = _TILESET_RECTS.get((col, row))
+    if not rect:
+        return None
+    x, y, w, h = rect
 
     tile = pygame.Surface((w, h), pygame.SRCALPHA)
     tile.blit(sheet, (0, 0), (x, y, w, h))
@@ -80,7 +99,7 @@ def _slice_tileset_tile(col: int, row: int, key_out_bg: bool = False, base_surf:
                     px[ix, iy] = (0, 0, 0, 0)
         del px
 
-    scaled = pygame.transform.smoothscale(tile, (TILE_SIZE, TILE_SIZE))
+    scaled = pygame.transform.smoothscale(tile, (target_w, target_h))
 
     if base_surf is not None:
         result = base_surf.copy()
@@ -188,18 +207,29 @@ def tile_desk():
 def tile_seat():
     c = _get("t_seat")
     if c: return c
-    # Try custom tileset seats (3 red seats block at ~0, 272, 128, 80)
-    img = _load_tile_img("seat") or _slice_custom(0, 272, 42, 80)
+    # Try: individual file > custom tileset > tileset.jpg seat > procedural
+    img = _load_tile_img("seat")
     if not img:
+        # Slice a single seat from the tileset.jpg (row 1, col 0)
         img = _slice_tileset_tile(0, 1, key_out_bg=True, base_surf=tile_carpet())
     if img: return _put("t_seat", img)
-    def detail(s):
-        pygame.draw.rect(s, C_SEAT_EMPTY, (8, 4, TILE_SIZE - 16, 16))
-        pygame.draw.rect(s, _darken(C_SEAT_EMPTY, 20), (8, 4, TILE_SIZE - 16, 3))
-        pygame.draw.rect(s, _lighten(C_SEAT_EMPTY, 15), (8, 22, TILE_SIZE - 16, 16))
-        pygame.draw.rect(s, _darken(C_SEAT_EMPTY, 30), (4, 10, 4, 28))
-        pygame.draw.rect(s, _darken(C_SEAT_EMPTY, 30), (TILE_SIZE - 8, 10, 4, 28))
-    return _put("t_seat", _gen_tile(C_FLOOR, detail))
+    # Rich procedural seat with 3D depth
+    s = tile_carpet().copy()
+    seat_c = (140, 25, 35)  # Deep cinema red
+    # Armrests
+    pygame.draw.rect(s, (80, 60, 40), (4, 8, 5, 32))
+    pygame.draw.rect(s, (80, 60, 40), (TILE_SIZE-9, 8, 5, 32))
+    # Seat back (dark shadow)
+    pygame.draw.rect(s, _darken(seat_c, 40), (9, 4, TILE_SIZE-18, 18), border_radius=3)
+    # Seat cushion
+    pygame.draw.rect(s, seat_c, (9, 20, TILE_SIZE-18, 18), border_radius=4)
+    # Highlights
+    pygame.draw.rect(s, _lighten(seat_c, 30), (11, 6, TILE_SIZE-22, 3), border_radius=2)
+    pygame.draw.rect(s, _lighten(seat_c, 20), (11, 22, TILE_SIZE-22, 4), border_radius=2)
+    # Gold studs on armrests
+    pygame.draw.circle(s, (200, 170, 80), (6, 12), 2)
+    pygame.draw.circle(s, (200, 170, 80), (TILE_SIZE-7, 12), 2)
+    return _put("t_seat", s)
 
 
 def tile_door():
@@ -257,18 +287,26 @@ def tile_snack() -> pygame.Surface:
 def tile_screen() -> pygame.Surface:
     c = _get("t_screen")
     if c: return c
-    # Try custom tileset cinema screen (red U shape, top-left of sheet: 0, 0, 128, 96)
-    img = _load_tile_img("screen") or _slice_custom(0, 0, 128, 96)
-    if not img:
-        img = _slice_tileset_tile(4, 1)
+    # Try: individual file > tileset.jpg TV screen > procedural
+    img = _load_tile_img("screen") or _slice_tileset_tile(4, 1)
     if img: return _put("t_screen", img)
-    def detail(s):
-        pygame.draw.rect(s, C_SCREEN, (2, 2, TILE_SIZE - 4, TILE_SIZE - 4))
-        pygame.draw.rect(s, (40, 60, 120), (2, 2, TILE_SIZE - 4, TILE_SIZE - 4), 2)
-        glow = _make(TILE_SIZE, TILE_SIZE)
-        glow.fill((*C_NEON_CYAN[:3], 20))
-        s.blit(glow, (0, 0))
-    return _put("t_screen", _gen_tile(C_BG_DARK, detail))
+    # Rich procedural cinema screen
+    s = _make(TILE_SIZE, TILE_SIZE)
+    s.fill((5, 5, 15))
+    # Frame (brushed metal look)
+    frame_c = (40, 35, 55)
+    pygame.draw.rect(s, frame_c, (0, 0, TILE_SIZE, TILE_SIZE), border_radius=2)
+    # Inner screen (dark blue with subtle gradient)
+    pygame.draw.rect(s, (8, 15, 40), (3, 3, TILE_SIZE-6, TILE_SIZE-6), border_radius=1)
+    # Screen reflection highlights
+    glow = _make(TILE_SIZE-8, TILE_SIZE-8)
+    for y in range(glow.get_height()):
+        a = int(15 * (1 - y / glow.get_height()))
+        pygame.draw.line(glow, (100, 180, 255, a), (0, y), (glow.get_width(), y))
+    s.blit(glow, (4, 4))
+    # Bottom bezel
+    pygame.draw.rect(s, _lighten(frame_c, 15), (2, TILE_SIZE-5, TILE_SIZE-4, 3))
+    return _put("t_screen", s)
 
 
 def tile_usher() -> pygame.Surface:
@@ -285,22 +323,37 @@ def tile_usher() -> pygame.Surface:
 
 
 def tile_security() -> pygame.Surface:
-    surf = pygame.Surface((TILE_SIZE, TILE_SIZE))
-    surf.fill(C_FLOOR)
-    pygame.draw.rect(surf, C_SECURITY, (0, 10, TILE_SIZE, 28), border_radius=4)
-    pygame.draw.rect(surf, (50, 50, 50), (10, 14, 28, 20)) # scanner
-    return surf
+    c = _get("t_security")
+    if c: return c
+    surf = tile_floor().copy()
+    # Metal detector frame
+    pygame.draw.rect(surf, (60, 65, 75), (2, 6, TILE_SIZE-4, 34), border_radius=4)
+    pygame.draw.rect(surf, (80, 85, 95), (6, 10, TILE_SIZE-12, 26), border_radius=3)
+    # Scanner screen
+    pygame.draw.rect(surf, (20, 40, 30), (14, 14, 20, 16), border_radius=2)
+    # LED indicators
+    pygame.draw.circle(surf, (50, 200, 80), (12, 18), 2)
+    pygame.draw.circle(surf, (200, 50, 50), (12, 24), 2)
+    return _put("t_security", surf)
 
 
 def tile_poster() -> pygame.Surface:
-    surf = pygame.Surface((TILE_SIZE, TILE_SIZE))
-    surf.fill(C_WALL)
-    pygame.draw.rect(surf, C_POSTER_BG, (8, 4, 32, 40))
-    pygame.draw.rect(surf, (200, 200, 200), (8, 4, 32, 40), 2) # frame
-    # abstract poster art
-    pygame.draw.circle(surf, (255, 100, 100), (24, 20), 8)
-    pygame.draw.line(surf, (200, 200, 200), (12, 34), (36, 34), 2)
-    return surf
+    c = _get("t_poster")
+    if c: return c
+    surf = tile_corridor().copy()
+    # Ornate frame
+    frame_c = (180, 150, 80)
+    pygame.draw.rect(surf, frame_c, (6, 2, 36, 44), border_radius=2)
+    pygame.draw.rect(surf, _darken(frame_c, 30), (6, 2, 36, 44), 2, border_radius=2)
+    # Poster interior
+    pygame.draw.rect(surf, (30, 20, 50), (10, 6, 28, 36))
+    # Abstract movie art (stylized star)
+    pygame.draw.circle(surf, (200, 60, 80), (24, 18), 8)
+    pygame.draw.circle(surf, (240, 180, 60), (24, 18), 4)
+    # Title lines
+    pygame.draw.line(surf, (200, 200, 200), (14, 32), (34, 32), 2)
+    pygame.draw.line(surf, (160, 160, 160), (16, 36), (32, 36), 1)
+    return _put("t_poster", surf)
 
 
 def tile_plant() -> pygame.Surface:
@@ -324,12 +377,19 @@ def tile_table() -> pygame.Surface:
 
 
 def tile_corridor() -> pygame.Surface:
+    c = _get("t_corridor")
+    if c: return c
     surf = pygame.Surface((TILE_SIZE, TILE_SIZE))
     surf.fill(C_CORRIDOR)
-    # subtle pattern
-    pygame.draw.line(surf, (35, 25, 50), (0, 0), (TILE_SIZE, TILE_SIZE))
-    pygame.draw.line(surf, (35, 25, 50), (TILE_SIZE, 0), (0, TILE_SIZE))
-    return surf
+    # Dark patterned carpet look for cinema corridor
+    for y in range(0, TILE_SIZE, 8):
+        for x in range(0, TILE_SIZE, 8):
+            if (x + y) % 16 == 0:
+                pygame.draw.rect(surf, _lighten(C_CORRIDOR, 8), (x, y, 8, 8))
+    # Subtle running lights along edges
+    pygame.draw.line(surf, (60, 40, 80), (0, 0), (0, TILE_SIZE))
+    pygame.draw.line(surf, (60, 40, 80), (TILE_SIZE-1, 0), (TILE_SIZE-1, TILE_SIZE))
+    return _put("t_corridor", surf)
 
 
 # Tile lookup by ID
