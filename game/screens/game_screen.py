@@ -23,6 +23,7 @@ from game.core.particles import ParticleSystem
 from game.core import asset_loader as AL
 from game.entities.player import Player, Stage
 from game.entities.staff import StaffMember, build_staff
+from game.entities.npc import build_npcs
 from game.world.interactions import build_zones, find_nearest_zone
 from game.ui.speech_bubble import SpeechBubble, DialogPrompt
 from game.ui.dialog_menu import TicketDialog, ConcessionDialog, UsherDialog
@@ -119,6 +120,9 @@ class GameScreen:
         self.particles = ParticleSystem()
         self.bubbles: list[SpeechBubble] = []
         self._dialog_prompt = DialogPrompt()
+
+        # NPCs — ambient townspeople wandering the lobby
+        self.npcs = build_npcs(5)
 
         # HUD
         self.hud = SimpleHUD(self.player)
@@ -337,6 +341,10 @@ class GameScreen:
         for z in self.zones:
             z.update(dt)
 
+        # NPCs
+        for npc in self.npcs:
+            npc.update(dt)
+
         # Interaction check
         self._check_interaction()
 
@@ -398,6 +406,10 @@ class GameScreen:
         for z in self.zones:
             if z.name == needed or z.name in ["poster", "security", "board"]:
                 z.draw_glow(world, self.camera)
+
+        # NPCs (draw behind player for depth)
+        for npc in self.npcs:
+            npc.draw(surface, self.camera)
 
         # Staff
         for staff in self.staff:
