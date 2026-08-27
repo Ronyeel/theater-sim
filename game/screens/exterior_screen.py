@@ -13,6 +13,7 @@ from game.settings import (
 )
 from game.core import asset_loader as AL
 from game.core.particles import ParticleSystem
+from game.entities.npc import moviegoer_sprite
 from game.entities.player import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP
 from game.ui.speech_bubble import DialogPrompt
 
@@ -74,12 +75,58 @@ class ExteriorScreen:
         self._fade_surf = pygame.Surface((SCREEN_W, SCREEN_H))
         self._fade_surf.fill((0, 0, 0))
 
-        # Ambient NPCs outside
+        # Ambient visitors have different lanes, speeds and destinations so
+        # the forecourt feels like a small crowd, not a looping backdrop.
         self._pedestrians = [
-            {"x": self._offset_x + self._bg_w * 0.22, "y": self._bg_h * 0.76, "dir": DIR_RIGHT, "spd": 25, "fr": 0, "col": 1},
-            {"x": self._offset_x + self._bg_w * 0.78, "y": self._bg_h * 0.78, "dir": DIR_LEFT,  "spd": 20, "fr": 0, "col": 3},
-            {"x": self._offset_x + self._bg_w * 0.35, "y": self._bg_h * 0.85, "dir": DIR_RIGHT, "spd": 15, "fr": 0, "col": 5},
+            self._make_pedestrian(0.22, 0.76, DIR_RIGHT, 25, 2),
+            self._make_pedestrian(0.78, 0.78, DIR_LEFT, 20, 19),
+            self._make_pedestrian(0.35, 0.85, DIR_RIGHT, 15, 34),
+            self._make_pedestrian(0.66, 0.89, DIR_LEFT, 18, 45),
         ]
+
+    def _make_pedestrian(self, x_ratio, y_ratio, direction, speed, character_id):
+        """Create a visitor that strolls, pauses, and occasionally changes lane."""
+        return {
+            "x": self._offset_x + self._bg_w * x_ratio,
+            "y": self._bg_h * y_ratio,
+            "home_y": self._bg_h * y_ratio,
+            "dir": direction,
+            "spd": speed * random.uniform(0.85, 1.15),
+            "fr": random.randrange(3),
+            "anim": random.uniform(0.0, 0.14),
+            "pause": random.uniform(0.2, 1.6),
+            "turn_at": random.uniform(2.2, 5.0),
+            # Use the supplied moviegoer character sheets here too, rather
+            # than the simple generated figure used by the old exterior.
+            "character_id": character_id,
+        }
+
+    def _update_pedestrians(self, dt):
+        left_edge = self._offset_x + self._bg_w * 0.16
+        right_edge = self._offset_x + self._bg_w * 0.84
+        for ped in self._pedestrians:
+            if ped["pause"] > 0:
+                ped["pause"] -= dt
+                ped["fr"] = 0
+                continue
+
+            ped["turn_at"] -= dt
+            ped["x"] += (ped["spd"] if ped["dir"] == DIR_RIGHT else -ped["spd"]) * dt
+            # A tiny lane drift makes the group feel less locked to a grid.
+            ped["y"] = ped["home_y"] + math.sin(self._t * 1.3 + ped["character_id"]) * 3
+            ped["anim"] += dt
+            if ped["anim"] >= 0.16:
+                ped["anim"] = 0.0
+                ped["fr"] = (ped["fr"] + 1) % 3
+
+            reached_edge = ped["x"] <= left_edge or ped["x"] >= right_edge
+            if reached_edge or ped["turn_at"] <= 0:
+                ped["dir"] = DIR_LEFT if ped["dir"] == DIR_RIGHT else DIR_RIGHT
+                ped["x"] = max(left_edge, min(right_edge, ped["x"]))
+                ped["turn_at"] = random.uniform(2.5, 5.5)
+                # Some visitors stop to check the marquee before continuing.
+                if random.random() < 0.45:
+                    ped["pause"] = random.uniform(0.45, 1.5)
 
     def handle_event(self, evt):
         if self._entering:
@@ -150,13 +197,7 @@ class ExteriorScreen:
         else:
             self._anim_frame = 0
 
-        # Update ambient pedestrians
-        for ped in self._pedestrians:
-            ped["x"] += (ped["spd"] if ped["dir"] == DIR_RIGHT else -ped["spd"]) * dt
-            if ped["x"] > self._offset_x + self._bg_w * 0.82:
-                ped["dir"] = DIR_LEFT
-            elif ped["x"] < self._offset_x + self._bg_w * 0.18:
-                ped["dir"] = DIR_RIGHT
+        self._update_pedestrians(dt)
 
         # Door proximity check
         dist = math.hypot(self.px - self.door_x, self.py - self.door_y)
@@ -205,9 +246,13 @@ class ExteriorScreen:
         pygame.draw.circle(door_pulse, (*C_NEON_GOLD[:3], 90), (pulse_r, pulse_r), pulse_r, 2)
         surface.blit(door_pulse, (int(self.door_x - pulse_r), int(self.door_y - pulse_r)))
 
-        # Draw Pedestrians
-        for ped in self._pedestrians:
-            npc_s = AL.npc_sprite(ped["col"], ped["fr"], ped["dir"])
+        # Draw pedestrians from back to front, with a small shadow to anchor
+        # them on the sidewalk.
+        for ped in sorted(self._pedestrians, key=lambda item: item["y"]):
+            npc_s = moviegoer_sprite(ped["character_id"], ped["fr"], ped["dir"])
+            shadow = pygame.Surface((22, 7), pygame.SRCALPHA)
+            pygame.draw.ellipse(shadow, (0, 0, 0, 65), shadow.get_rect())
+            surface.blit(shadow, (int(ped["x"]) - 11, int(ped["y"]) - 4))
             surface.blit(npc_s, (int(ped["x"]) - npc_s.get_width()//2, int(ped["y"]) - npc_s.get_height()))
 
         # Draw Player Drop Shadow

@@ -535,27 +535,62 @@ def npc_sprite(color_idx=0, frame=0, direction=0):
     return _put(key, _gen_char(color, frame=frame, direction=direction))
 
 
+_STAFF_CHARACTER_SPECS = {
+    # sheet filename, character index. All supplied animation sheets share
+    # the same 18×26, 3-frame, 4-direction layout.
+    "cashier": ("Townspeople_Animations.png", 0),
+    "usher":   ("MinersConstruction_Animations.png", 3),
+    "server":  ("ForestNpcs_Animations.png", 1),
+}
+
+
+def _staff_character_sprite(role, frame=0, direction=0):
+    """Use the real animation-sheet character assigned to a staff role."""
+    key = f"staff_character_{role}_{frame % 3}_{direction}"
+    cached = _get(key)
+    if cached is not None:
+        return cached
+
+    filename, character_index = _STAFF_CHARACTER_SPECS[role]
+    path = os.path.join(SPRITES_DIR, filename)
+    if not os.path.exists(path):
+        return False
+    sheet = pygame.image.load(path).convert_alpha()
+    row_group, col_group = divmod(character_index, 4)
+    source = pygame.Rect(
+        col_group * 3 * 18 + (frame % 3) * 18,
+        row_group * 4 * 26 + direction * 26,
+        18, 26,
+    )
+    cropped = pygame.Surface(source.size, pygame.SRCALPHA)
+    cropped.blit(sheet, (0, 0), source)
+    return _put(key, pygame.transform.scale(cropped, (42, 58)))
+
+
 def cashier_sprite(frame=0, direction=0):
     key = f"cashier_{frame}_{direction}"
     c = _get(key)
     if c: return c
-    return _put(key, _gen_char(C_CASHIER_VEST, frame=frame, direction=direction))
+    sprite = _staff_character_sprite("cashier", frame, direction)
+    return _put(key, sprite or _gen_char(C_CASHIER_VEST, frame=frame, direction=direction))
 
 
 def usher_sprite(frame=0, direction=0):
     key = f"usher_{frame}_{direction}"
     c = _get(key)
     if c: return c
-    return _put(key, _gen_char(C_USHER_JACKET, hat_color=(60, 20, 25),
-                               frame=frame, direction=direction))
+    sprite = _staff_character_sprite("usher", frame, direction)
+    return _put(key, sprite or _gen_char(C_USHER_JACKET, hat_color=(60, 20, 25),
+                                          frame=frame, direction=direction))
 
 
 def server_sprite(frame=0, direction=0):
     key = f"server_{frame}_{direction}"
     c = _get(key)
     if c: return c
-    return _put(key, _gen_char((60, 60, 120), accessory=C_SERVER_APRON,
-                               frame=frame, direction=direction))
+    sprite = _staff_character_sprite("server", frame, direction)
+    return _put(key, sprite or _gen_char((60, 60, 120), accessory=C_SERVER_APRON,
+                                          frame=frame, direction=direction))
 
 
 # ── Bubble / UI generators ───────────────────────────────────────────────

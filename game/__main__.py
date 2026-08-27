@@ -3,8 +3,9 @@ CinePlex Dreams — Entry Point
 Run: .venv/Scripts/python -m game
 """
 import sys
+import random
 import pygame
-from game.settings import SCREEN_W, SCREEN_H, FPS, GAME_TITLE
+from game.settings import SCREEN_W, SCREEN_H, FPS, GAME_TITLE, RANDOM_SEED
 from game.screens.main_menu import MainMenu
 from game.screens.exterior_screen import ExteriorScreen
 from game.screens.game_screen import GameScreen
@@ -50,6 +51,7 @@ class App:
 
 
 def main():
+    random.seed(RANDOM_SEED)
     pygame.init()
     pygame.display.set_caption(GAME_TITLE)
 
@@ -82,4 +84,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Ctrl+C is a normal way to stop a game launched from PowerShell.
+        # Exit without treating it as a runtime error or printing a traceback.
+        pygame.quit()

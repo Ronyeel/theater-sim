@@ -30,6 +30,8 @@ DEFAULT_SERVERS          = 2
 DEFAULT_RUNTIME          = 90     # simulated minutes
 DEFAULT_ARRIVAL_INTERVAL = 0.20   # sim minutes between NPC arrivals (12 sec)
 DEFAULT_FOOD_PROB        = 0.5
+# Reproducible NPC appearances, choices, and service timing.
+RANDOM_SEED              = 42
 SIM_SPEEDS               = [1, 2, 5, 10]
 
 # ── Asset paths ───────────────────────────────────────────────────────────
@@ -131,6 +133,8 @@ CASHIER_QUEUE_ROW   = 18                         # queue ropes in front (below d
 USHER_DESK_ROW      = 14
 USHER_DESK_COLS     = [7, 12]
 USHER_GATE_COLS     = list(range(1, MAP_COLS - 1))  # invisible checkpoint barrier
+# The open central passage between the two ushers.
+USHER_PASSAGE_COLS  = [8, 9, 10, 11]
 
 # Concession (row 11)
 SNACK_DESK_ROW      = 11

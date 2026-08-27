@@ -8,10 +8,11 @@ import math
 from game.settings import (
     TILE_SIZE, INTERACT_RADIUS, C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN, C_NEON_RED,
     C_SECURITY, C_WALL_TRIM, CASHIER_DESK_COLS, USHER_DESK_COLS, 
-    SNACK_DESK_COLS, SEAT_ROWS, SEAT_COLS,
+    SNACK_DESK_COLS, SEAT_ROWS, SEAT_COLS, TILE_SEAT,
     CASHIER_QUEUE_ROW, USHER_DESK_ROW, SNACK_DESK_ROW, 
     SECURITY_COL, SECURITY_ROW, BOARD_COL, BOARD_ROW, EXIT_DOOR_COLS, EXIT_DOOR_ROW
 )
+from game.core.tilemap import tile_at
 
 
 class Zone:
@@ -87,9 +88,14 @@ def build_zones(num_cashiers: int, num_ushers: int, num_servers: int) -> list[Zo
         x, y = _tc(col, SNACK_DESK_ROW - 1)
         zones.append(Zone("snack", x, y, C_NEON_CYAN, "[E] Buy Snacks"))
 
-    # Seat zones — sample of seats per row
+    # Seat zones — one interaction point per two physical chairs.  The map
+    # contains a centre aisle inside SEAT_COLS, so only add a zone when the
+    # tile itself is a seat; this prevents an invisible "take seat" target
+    # from appearing in the middle walkway.
     for row in SEAT_ROWS:
         for col in range(SEAT_COLS[0], SEAT_COLS[-1], 2):
+            if tile_at(col, row) != TILE_SEAT:
+                continue
             x, y = _tc(col, row)
             zones.append(Zone("seat", x, y, C_NEON_GOLD, "[E] Take Seat"))
 

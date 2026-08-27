@@ -14,7 +14,6 @@ from game.settings import (
     CASHIER_DESK_COLS, CASHIER_DESK_ROW,
     USHER_DESK_COLS, USHER_DESK_ROW,
     SNACK_DESK_COLS, SNACK_DESK_ROW,
-    SEAT_COLS, SEAT_ROWS,
     MOVIES,
 )
 from game.core.camera import Camera
@@ -22,8 +21,8 @@ from game.core.tilemap import TileMap
 from game.core.particles import ParticleSystem
 from game.core import asset_loader as AL
 from game.entities.player import Player, Stage
-from game.entities.staff import StaffMember, build_staff
 from game.entities.npc import build_npcs
+from game.backend_bridge import TheaterSimulationBridge
 from game.world.interactions import build_zones, find_nearest_zone
 from game.ui.speech_bubble import SpeechBubble, DialogPrompt
 from game.ui.dialog_menu import TicketDialog, ConcessionDialog, UsherDialog
@@ -96,6 +95,8 @@ class SimpleHUD:
 # ── Game Screen ───────────────────────────────────────────────────────────
 
 class GameScreen:
+    MAX_VISIBLE_NPCS = 100
+
     def __init__(self, go_title):
         self.go_title   = go_title
         self._t = 0.0
@@ -113,7 +114,10 @@ class GameScreen:
         self._num_cashiers = len(CASHIER_DESK_COLS)
         self._num_ushers   = len(USHER_DESK_COLS)
         self._num_servers  = len(SNACK_DESK_COLS)
-        self.staff = build_staff(self._num_cashiers, self._num_ushers, self._num_servers)
+        # Stall tiles already contain their cashier, usher, and concession
+        # artwork. Their interaction zones and SimPy resources provide the
+        # service function, so no extra staff sprite is spawned on top.
+        self.staff = []
         self.zones = build_zones(self._num_cashiers, self._num_ushers, self._num_servers)
 
         # Particles & Bubbles
@@ -121,8 +125,17 @@ class GameScreen:
         self.bubbles: list[SpeechBubble] = []
         self._dialog_prompt = DialogPrompt()
 
-        # NPCs — ambient townspeople wandering the lobby
-        self.npcs = build_npcs(5)
+        # A small randomized opening crowd enters through the doors over time.
+        self.npcs = build_npcs(random.randint(3, 8))
+        self._npc_arrival_timer = random.uniform(3.0, 7.0)
+        self._movie_finished = False
+
+        # Run the activity's SimPy model in parallel with the visual world.
+        # This does not alter rendering or the existing player controls.
+        self.simulation = TheaterSimulationBridge(
+            self._num_cashiers, self._num_servers, self._num_ushers,
+            seed=42,
+        )
 
         # HUD
         self.hud = SimpleHUD(self.player)
@@ -343,7 +356,23 @@ class GameScreen:
 
         # NPCs
         for npc in self.npcs:
-            npc.update(dt)
+            npc.update(dt, self.npcs, movie_finished=self._movie_finished)
+        self.npcs = [npc for npc in self.npcs if not npc.has_left]
+
+        # Keep adding realistic arrivals, but never render more than the
+        # configured visual population cap.  The SimPy backend may continue
+        # simulating additional customers for statistics.
+        self._npc_arrival_timer -= dt
+        if (not self._movie_finished and self._npc_arrival_timer <= 0
+                and len(self.npcs) < self.MAX_VISIBLE_NPCS):
+            new_npcs = build_npcs(1, slot_offset=len(self.npcs))
+            self.npcs.extend(new_npcs)
+            self._npc_arrival_timer = random.uniform(3.0, 7.0)
+
+        # Advance the same minute-based queue model used by src/main.py.
+        self.simulation.update(dt)
+        if not self.simulation.is_running:
+            self._movie_finished = True
 
         # Interaction check
         self._check_interaction()
@@ -409,7 +438,7 @@ class GameScreen:
 
         # NPCs (draw behind player for depth)
         for npc in self.npcs:
-            npc.draw(surface, self.camera)
+            npc.draw(world, self.camera)
 
         # Staff
         for staff in self.staff:
