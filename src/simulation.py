@@ -63,16 +63,15 @@ def run_theater(
 ) -> Generator[Any, None, None]:
    
 
-    initial_crowd = random.randint(2, 6)
-    for moviegoer in range(initial_crowd):
+    # The activity specification begins with three guests already in line.
+    for moviegoer in range(3):
         if on_arrival:
             on_arrival(moviegoer)
         env.process(
             go_to_movies(env, moviegoer, theater, wait_times, food_probability)
         )
 
-
-    moviegoer = initial_crowd
+    moviegoer = 3
     while True:
         yield env.timeout(arrival_interval)
         if on_arrival:

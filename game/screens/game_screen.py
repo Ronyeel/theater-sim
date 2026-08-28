@@ -131,8 +131,12 @@ class GameScreen:
             )
 
 
+
+    _MAX_VISUAL_NPCS = 30
+
     def _spawn_simulation_npc(self, moviegoer_id: int):
-        if moviegoer_id >= 200 and (moviegoer_id % 5 != 0):
+        # Only spawn a new visual sprite if under the cap.
+        if len(self.npcs) >= self._MAX_VISUAL_NPCS:
             return
         guests = build_npcs(1, slot_offset=moviegoer_id)
         for guest in guests:
@@ -227,6 +231,7 @@ class GameScreen:
 
             for npc in self.npcs:
                 npc.update(sim_dt, self.npcs, movie_finished=self._movie_finished)
+            # Prune sprites that have left so new ones can spawn up to the cap.
             self.npcs = [npc for npc in self.npcs if not npc.has_left]
 
             self.simulation.update(dt)

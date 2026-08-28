@@ -141,7 +141,7 @@ class HUD:
             total_active = stats.active_guests
 
         lbl_vol = self._lbl_f.render("CUSTOMER FLOW", True, (130, 145, 175))
-        val_vol = self._val_f.render(f"{seated} Seated / {stats.total_arrived} Total", True, C_TEXT_WHITE)
+        val_vol = self._val_f.render(f"{stats.total_seated} Seated / {stats.total_arrived} Total", True, C_TEXT_WHITE)
         surface.blit(lbl_vol, (x3, 7))
         surface.blit(val_vol, (x3, 21))
 
