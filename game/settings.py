@@ -23,10 +23,14 @@ PLAYER_SPRITE_H     = 32
 INTERACT_RADIUS     = 60    # pixels — how close to trigger [E]
 INTERACT_HOLD_TIME  = 0.8   # seconds the interaction animation plays
 
+# Temporary movement diagnostic: show each NPC's collision clearance ring and
+# a line to the NPC that made it yield.
+DEBUG_NPC_COLLISION_RANGE = False
+
 # ── Simulation defaults ───────────────────────────────────────────────────
-DEFAULT_CASHIERS         = 3
-DEFAULT_USHERS           = 1
-DEFAULT_SERVERS          = 2
+DEFAULT_CASHIERS         = 0
+DEFAULT_USHERS           = 0
+DEFAULT_SERVERS          = 0
 DEFAULT_RUNTIME          = 90     # simulated minutes
 DEFAULT_ARRIVAL_INTERVAL = 0.20   # sim minutes between NPC arrivals (12 sec)
 DEFAULT_FOOD_PROB        = 0.5
@@ -107,7 +111,7 @@ TILE_DESK       = 4    # cashier desk — solid
 TILE_SEAT       = 5    # theater seat — walkable/interactable
 TILE_DOOR       = 6    # entrance door — walkable
 TILE_NEON       = 7    # neon wall strip — solid
-TILE_QUEUE      = 8    # queue rope marker — walkable
+TILE_QUEUE      = 8    # queue rope marker — solid barrier
 TILE_SNACK      = 9    # snack counter — solid
 TILE_SCREEN     = 10   # cinema screen — solid
 TILE_USHER      = 11   # usher desk — solid

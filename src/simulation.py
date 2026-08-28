@@ -4,15 +4,24 @@ def moviegoer_journey(env, moviegoer_id, theater, wait_times, food_probability):
     """Run one guest through ticketing, usher check, optional food, and seating."""
     arrival_time = env.now
 
+    if not theater.cashier_available:
+        yield env.event()
+        return
     with theater.cashier.request() as request:
         yield request
         yield env.process(theater.purchase_ticket(moviegoer_id))
 
+    if not theater.usher_available:
+        yield env.event()
+        return
     with theater.usher.request() as request:
         yield request
         yield env.process(theater.check_ticket(moviegoer_id))
 
     if random.random() < food_probability:
+        if not theater.server_available:
+            yield env.event()
+            return
         with theater.server.request() as request:
             yield request
             yield env.process(theater.buy_food(moviegoer_id))

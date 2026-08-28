@@ -8,9 +8,23 @@ class MovieTheater:
     """
     def __init__(self, env, num_cashiers, num_servers, num_ushers):
         self.env = env
-        self.cashier = simpy.Resource(env, num_cashiers)
-        self.server = simpy.Resource(env, num_servers)
-        self.usher = simpy.Resource(env, num_ushers)
+        self.num_cashiers = max(0, int(num_cashiers))
+        self.num_servers = max(0, int(num_servers))
+        self.num_ushers = max(0, int(num_ushers))
+        # SimPy resources require positive capacity. Availability flags retain
+        # a user-entered zero as a genuinely closed service point.
+        self.cashier = simpy.Resource(env, max(1, self.num_cashiers))
+        self.server = simpy.Resource(env, max(1, self.num_servers))
+        self.usher = simpy.Resource(env, max(1, self.num_ushers))
+
+    @property
+    def cashier_available(self): return self.num_cashiers > 0
+
+    @property
+    def server_available(self): return self.num_servers > 0
+
+    @property
+    def usher_available(self): return self.num_ushers > 0
 
     def purchase_ticket(self, moviegoer):
         # Box-office transaction: 1–3 minutes.

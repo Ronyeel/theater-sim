@@ -168,9 +168,19 @@ class Player:
                 return False
             return is_walkable(col, row)
 
-        if passable(new_x - hw + 2, self.y) and passable(new_x + hw - 2, self.y):
+        # Test all foot-box corners. The former centre-line test let the
+        # player visibly overlap a counter or seat when approaching diagonally.
+        def foot_box_passable(cx, cy):
+            return all(passable(px, py) for px, py in (
+                (cx - hw + 2, cy - hh + 2),
+                (cx + hw - 2, cy - hh + 2),
+                (cx - hw + 2, cy + hh - 2),
+                (cx + hw - 2, cy + hh - 2),
+            ))
+
+        if foot_box_passable(new_x, self.y):
             self.x = new_x
-        if passable(self.x - hw + 2, new_y) and passable(self.x + hw - 2, new_y):
+        if foot_box_passable(self.x, new_y):
             self.y = new_y
 
         # Animation

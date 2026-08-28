@@ -32,7 +32,9 @@ PL = TILE_PLANT
 T  = TILE_TABLE
 CR = TILE_CORRIDOR
 
-WALKABLE = {TILE_FLOOR, TILE_CARPET, TILE_SEAT, TILE_DOOR, TILE_QUEUE, TILE_CORRIDOR}
+# Queue-rope tiles are physical barriers.  Keeping them out of the walkable
+# set prevents NPCs (and the player) from clipping through the rope line.
+WALKABLE = {TILE_FLOOR, TILE_CARPET, TILE_SEAT, TILE_DOOR, TILE_CORRIDOR}
 
 # ── 20 cols × 25 rows ────────────────────────────────────────────────────
 # Layout (bottom-to-top flow):

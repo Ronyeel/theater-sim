@@ -9,7 +9,7 @@ import simpy
 
 from src.theater import MovieTheater
 from src.simulation import generate_moviegoers
-from src.stats import average_wait
+from src.stats import average_wait, format_minutes_seconds
 
 
 class SimulationStats:
@@ -23,6 +23,12 @@ class SimulationStats:
         self.cashier_queue = 0
         self.usher_queue = 0
         self.snack_queue = 0
+        self.active_guests = 0
+        self.goal_met = True
+        self.goal_completion_rate = 0.0
+        self.cashiers_busy = 0
+        self.ushers_busy = 0
+        self.servers_busy = 0
 
 
 class TheaterSimulationBridge:
@@ -30,7 +36,7 @@ class TheaterSimulationBridge:
 
     def __init__(self, num_cashiers, num_servers, num_ushers,
                  arrival_interval=0.20, food_probability=0.5,
-                 runtime=90, speed=1, seed=42):
+                 runtime=90, speed=1, seed=42, on_arrival=None):
         self.num_cashiers = num_cashiers
         self.num_servers = num_servers
         self.num_ushers = num_ushers
@@ -39,6 +45,7 @@ class TheaterSimulationBridge:
         self.runtime = runtime
         self.speed = speed
         self.seed = seed
+        self._on_arrival = on_arrival
         self.stats = SimulationStats()
         self.is_running = False
         self.reset()
@@ -55,12 +62,15 @@ class TheaterSimulationBridge:
         self.env.process(generate_moviegoers(
             self.env, self.theater, self.wait_times,
             self.arrival_interval, self.food_prob,
-            on_arrival=lambda _id: self._arrival_count.__setitem__(
-                0, self._arrival_count[0] + 1
-            ),
+            on_arrival=self._handle_arrival,
         ))
         self.stats = SimulationStats()
         self.is_running = True
+
+    def _handle_arrival(self, moviegoer_id):
+        self._arrival_count[0] += 1
+        if self._on_arrival:
+            self._on_arrival(moviegoer_id)
 
     def update(self, real_seconds):
         """Advance simulated minutes according to the game's speed setting."""
@@ -73,8 +83,22 @@ class TheaterSimulationBridge:
         self.stats.total_arrived = self._arrival_count[0]
         self.stats.total_seated = len(self.wait_times)
         self.stats.avg_wait = average_wait(self.wait_times)
-        self.stats.cashier_queue = len(self.theater.cashier.queue)
-        self.stats.usher_queue = len(self.theater.usher.queue)
-        self.stats.snack_queue = len(self.theater.server.queue)
+        self.stats.cashier_queue = (self.stats.active_guests
+                                    if not self.theater.cashier_available
+                                    else len(self.theater.cashier.queue))
+        self.stats.usher_queue = (self.stats.active_guests
+                                  if self.theater.cashier_available and not self.theater.usher_available
+                                  else len(self.theater.usher.queue))
+        self.stats.snack_queue = (self.stats.active_guests
+                                  if self.theater.cashier_available and self.theater.usher_available
+                                  and not self.theater.server_available
+                                  else len(self.theater.server.queue))
+        self.stats.active_guests = max(0, self.stats.total_arrived - self.stats.total_seated)
+        self.stats.goal_met = self.stats.avg_wait <= 10.0
+        if self.wait_times:
+            self.stats.goal_completion_rate = sum(wait <= 10.0 for wait in self.wait_times) / len(self.wait_times)
+        self.stats.cashiers_busy = self.theater.cashier.count
+        self.stats.ushers_busy = self.theater.usher.count
+        self.stats.servers_busy = self.theater.server.count
         if self.env.now >= self.runtime:
             self.is_running = False
