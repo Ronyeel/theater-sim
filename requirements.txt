@@ -1,2 +1,3 @@
-simpy
-pygame-ce
+# Core dependencies for CinePlex Dreams Theater Simulation
+simpy>=4.1.0
+pygame-ce>=2.5.0

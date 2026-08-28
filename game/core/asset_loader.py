@@ -207,26 +207,26 @@ def tile_desk():
 def tile_seat():
     c = _get("t_seat")
     if c: return c
-    # Try: individual file > custom tileset > tileset.jpg seat > procedural
+
+    # 1. Load the single seat sprite directly from assets/tiles/seat.png
     img = _load_tile_img("seat")
-    if not img:
-        # Slice a single seat from the tileset.jpg (row 1, col 0)
-        img = _slice_tileset_tile(0, 1, key_out_bg=True, base_surf=tile_carpet())
-    if img: return _put("t_seat", img)
-    # Rich procedural seat with 3D depth
+    if img:
+        return _put("t_seat", img)
+
+    # 2. Fallback: slice from tileset.jpg (row 1, col 0 = single red seat)
+    img = _slice_tileset_tile(0, 1, key_out_bg=True, base_surf=tile_carpet())
+    if img:
+        return _put("t_seat", img)
+
+    # 3. Rich procedural seat with 3D depth
     s = tile_carpet().copy()
     seat_c = (140, 25, 35)  # Deep cinema red
-    # Armrests
     pygame.draw.rect(s, (80, 60, 40), (4, 8, 5, 32))
     pygame.draw.rect(s, (80, 60, 40), (TILE_SIZE-9, 8, 5, 32))
-    # Seat back (dark shadow)
     pygame.draw.rect(s, _darken(seat_c, 40), (9, 4, TILE_SIZE-18, 18), border_radius=3)
-    # Seat cushion
     pygame.draw.rect(s, seat_c, (9, 20, TILE_SIZE-18, 18), border_radius=4)
-    # Highlights
     pygame.draw.rect(s, _lighten(seat_c, 30), (11, 6, TILE_SIZE-22, 3), border_radius=2)
     pygame.draw.rect(s, _lighten(seat_c, 20), (11, 22, TILE_SIZE-22, 4), border_radius=2)
-    # Gold studs on armrests
     pygame.draw.circle(s, (200, 170, 80), (6, 12), 2)
     pygame.draw.circle(s, (200, 170, 80), (TILE_SIZE-7, 12), 2)
     return _put("t_seat", s)
@@ -647,6 +647,60 @@ def bubble_star():
     return _put("bub_star", _gen_bubble(icon))
 
 
+# ── Bubble / UI generators ───────────────────────────────────────────────
+
+def _gen_bubble(icon_fn, bg=(255, 255, 255, 220)):
+    s = _make(28, 32)
+    pygame.draw.rect(s, bg, (1, 1, 26, 24), border_radius=5)
+    pygame.draw.rect(s, (120, 120, 120), (1, 1, 26, 24), 1, border_radius=5)
+    # tail
+    pygame.draw.polygon(s, bg, [(12, 25), (16, 25), (14, 31)])
+    if icon_fn:
+        icon_fn(s)
+    return s
+
+
+def bubble_waiting():
+    c = _get("bub_wait")
+    if c: return c
+    def icon(s):
+        pygame.draw.polygon(s, (240, 190, 50), [(8, 6), (20, 6), (14, 14)])
+        pygame.draw.polygon(s, (240, 190, 50), [(8, 22), (20, 22), (14, 14)])
+    return _put("bub_wait", _gen_bubble(icon))
+
+
+def bubble_happy():
+    c = _get("bub_happy")
+    if c: return c
+    def icon(s):
+        pygame.draw.circle(s, (80, 200, 80), (10, 10), 2)
+        pygame.draw.circle(s, (80, 200, 80), (18, 10), 2)
+        pygame.draw.arc(s, (80, 200, 80), (8, 12, 12, 8), 3.14, 6.28, 2)
+    return _put("bub_happy", _gen_bubble(icon))
+
+
+def bubble_angry():
+    c = _get("bub_angry")
+    if c: return c
+    def icon(s):
+        pygame.draw.circle(s, (240, 60, 60), (10, 10), 2)
+        pygame.draw.circle(s, (240, 60, 60), (18, 10), 2)
+        pygame.draw.line(s, (240, 60, 60), (8, 7), (12, 9), 2)
+        pygame.draw.line(s, (240, 60, 60), (20, 7), (16, 9), 2)
+        pygame.draw.arc(s, (240, 60, 60), (8, 16, 12, 6), 0, 3.14, 2)
+    return _put("bub_angry", _gen_bubble(icon))
+
+
+def bubble_star():
+    c = _get("bub_star")
+    if c: return c
+    def icon(s):
+        pts = [(14, 4), (16, 10), (22, 10), (17, 14),
+               (19, 20), (14, 16), (9, 20), (11, 14), (6, 10), (12, 10)]
+        pygame.draw.polygon(s, C_NEON_GOLD, pts)
+    return _put("bub_star", _gen_bubble(icon))
+
+
 def bubble_food():
     c = _get("bub_food")
     if c: return c
@@ -675,18 +729,50 @@ def bubble_speech(text, font):
 
 # ── Background ────────────────────────────────────────────────────────────
 
-def menu_background():
-    c = _get("menu_bg")
-    if c: return c
-    path = os.path.join(BG_DIR, "main_menu.jpg")
-    if os.path.exists(path):
-        img = pygame.image.load(path).convert()
+def menu_background_frames():
+    """Load and cache all animation frames for the main menu background GIF."""
+    c = _get("menu_bg_frames")
+    if c:
+        return c
+    path_gif = os.path.join(BG_DIR, "main_menu.gif")
+    path_jpg = os.path.join(BG_DIR, "main_menu.jpg")
+    frames = []
+    if os.path.exists(path_gif):
+        try:
+            anim = pygame.image.load_animation(path_gif)
+            for surf, dur in anim:
+                s = surf.convert()
+                if s.get_size() != (SCREEN_W, SCREEN_H):
+                    s = pygame.transform.scale(s, (SCREEN_W, SCREEN_H))
+                frames.append((s, dur / 1000.0 if dur > 0 else 0.17))
+        except Exception:
+            pass
+    if not frames and os.path.exists(path_jpg):
+        img = pygame.image.load(path_jpg).convert()
         img = pygame.transform.scale(img, (SCREEN_W, SCREEN_H))
-        return _put("menu_bg", img)
-    # fallback
-    s = pygame.Surface((SCREEN_W, SCREEN_H))
-    s.fill(C_BG_DARK)
-    return _put("menu_bg", s)
+        frames.append((img, 1.0))
+    if not frames:
+        s = pygame.Surface((SCREEN_W, SCREEN_H))
+        s.fill(C_BG_DARK)
+        frames.append((s, 1.0))
+    return _put("menu_bg_frames", frames)
+
+
+def menu_background(anim_t: float = 0.0):
+    """Return the active animation frame for the menu background at time anim_t."""
+    frames = menu_background_frames()
+    if len(frames) == 1:
+        return frames[0][0]
+    total_dur = sum(dur for _, dur in frames)
+    if total_dur <= 0:
+        return frames[0][0]
+    t = anim_t % total_dur
+    acc = 0.0
+    for surf, dur in frames:
+        acc += dur
+        if t < acc:
+            return surf
+    return frames[-1][0]
 
 
 def clear_cache():

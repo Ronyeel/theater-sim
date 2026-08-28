@@ -1,179 +1,138 @@
 """
-CinePlex Dreams — HUD
-Live stats panel, event log ticker, and mini-map zone indicators.
+Live Heads-Up Display (HUD)
+Pixel-styled telemetry dashboard for live simulation metrics, queue counts, player objective badges, and event logs.
 """
+
+from typing import List, Tuple, Optional
 import pygame
-import math
 from game.settings import (
-    SCREEN_W, SCREEN_H,
-    C_NEON_GOLD, C_NEON_CYAN, C_NEON_PINK, C_NEON_GREEN, C_NEON_RED,
-    C_TEXT_WHITE, C_TEXT_DIM, C_TEXT_GOLD, C_PANEL_BORDER, C_GOOD, C_BAD, C_WARN,
+    SCREEN_W, SCREEN_H, C_TEXT_WHITE, C_TEXT_DIM, C_NEON_GOLD,
+    C_NEON_CYAN, C_NEON_PINK, C_NEON_GREEN, C_NEON_RED,
 )
-from game.ui.button import draw_panel, draw_text, Button
+from src.stats import format_minutes_seconds
 
 
-def _font(name, size, bold=False):
-    try:    return pygame.font.SysFont(name, size, bold=bold)
-    except: return pygame.font.Font(None, size)
-
-
-def _bar(surface, rect, value, max_val, color, bg=(40,30,60), radius=4):
-    pygame.draw.rect(surface, bg, rect, border_radius=radius)
-    if max_val > 0:
-        fw = int(rect.w * min(1.0, value/max_val))
-        if fw > 0:
-            pygame.draw.rect(surface, color,
-                             pygame.Rect(rect.x, rect.y, fw, rect.h),
-                             border_radius=radius)
-    pygame.draw.rect(surface, C_PANEL_BORDER, rect, 1, border_radius=radius)
+def _get_font(name: str, size: int, bold: bool = False) -> pygame.font.Font:
+    try:
+        return pygame.font.SysFont(name, size, bold=bold)
+    except Exception:
+        return pygame.font.Font(None, size)
 
 
 class HUD:
-    LOG_MAX = 6
+    """Live simulation heads-up display rendering SimPy simulation metrics and sandbox spectator controls."""
 
-    def __init__(self, bridge, player):
-        self.bridge = bridge
+    LOG_MAX = 5
+
+    def __init__(self, simulation, player=None, npcs_provider: Optional[Callable] = None) -> None:
+        self.simulation = simulation
         self.player = player
+        self.npcs_provider = npcs_provider
+        self._log: List[Tuple[str, Tuple[int, int, int]]] = []
+        self._tf = _get_font("consolas", 13, bold=True)
+        self._lf = _get_font("consolas", 12)
+        self._sm = _get_font("consolas", 11)
+        self._log_t = 0.0
 
-        self._tf = _font("consolas", 13, bold=True)
-        self._sf = _font("consolas", 18, bold=True)
-        self._lf = _font("consolas", 12)
-        self._sm = _font("consolas", 11)
+    def add_log(self, text: str, color: Tuple[int, int, int] = (255, 255, 255)) -> None:
+        """Add a timed entry to the on-screen event log."""
+        self._log.insert(0, (text, color))
+        if len(self._log) > self.LOG_MAX:
+            self._log.pop()
+        self._log_t = 4.0
 
-        # Left stats panel
-        self._left  = pygame.Rect(8, 8, 210, 300)
-        # Right controls panel
-        self._right = pygame.Rect(SCREEN_W - 218, 8, 210, 180)
+    def update(self, dt: float) -> None:
+        """Update event log fade timers."""
+        self._log_t = max(0.0, self._log_t - dt)
 
-        # Buttons on right panel
-        rx, ry = self._right.x + 10, self._right.y + 36
-        self.btn_pause = Button(pygame.Rect(rx,      ry, 88, 30), "⏸ PAUSE",
-                                C_NEON_GOLD, font_size=13)
-        self.btn_reset = Button(pygame.Rect(rx+96,   ry, 88, 30), "↺ RESET",
-                                C_NEON_RED,  font_size=13)
-        # Speed buttons
-        self._spd_btns: list[tuple[int, Button]] = []
-        for i, (v, lbl) in enumerate([(1,"1×"),(2,"2×"),(5,"5×"),(10,"10×")]):
-            btn = Button(pygame.Rect(rx + i*46, ry+40, 40, 26), lbl,
-                         C_NEON_CYAN, font_size=13)
-            btn.on_click(lambda s=v: setattr(self.bridge, 'speed', s))
-            self._spd_btns.append((v, btn))
+    def handle_event(self, evt: pygame.event.Event) -> None:
+        """Process any HUD-specific events."""
+        pass
 
-        # Journey status strip
-        self._journey_rect = pygame.Rect(SCREEN_W//2 - 200, 8, 400, 36)
+    def draw(self, surface: pygame.Surface) -> None:
+        """Render HUD elements over the world surface."""
+        stats = self.simulation.stats
 
-        # Event log
-        self._log_rect = pygame.Rect(8, SCREEN_H - 100, SCREEN_W - 16, 92)
-        self._log: list[tuple[str, tuple]] = []
-        self._t = 0.0
+        def capsule(rect: pygame.Rect, title: str, value: str, color: Tuple[int, int, int]) -> None:
+            panel = pygame.Surface(rect.size, pygame.SRCALPHA)
+            panel.fill((19, 22, 40, 235))
+            surface.blit(panel, rect.topleft)
+            pygame.draw.rect(surface, (43, 48, 76), rect, 2, border_radius=3)
+            label = self._lf.render(title, True, (166, 177, 206))
+            value_surf = self._tf.render(value, True, color)
+            surface.blit(label, (rect.x + 8, rect.y + 5))
+            surface.blit(value_surf, (rect.x + 8, rect.y + 19))
 
-    def add_log(self, text: str, color=C_TEXT_WHITE):
-        self._log.append((text, color))
-        if len(self._log) > 40:
-            self._log = self._log[-40:]
+        # Time and Status values
+        minutes, seconds = format_minutes_seconds(stats.sim_time)
+        wait_minutes, wait_seconds = format_minutes_seconds(stats.avg_wait)
+        wait_color = C_NEON_GREEN if stats.goal_met else C_NEON_RED
 
-    def handle_event(self, evt):
-        self.btn_pause.handle_event(evt)
-        self.btn_reset.handle_event(evt)
-        for _, b in self._spd_btns: b.handle_event(evt)
+        if getattr(self.simulation, "is_paused", False):
+            run_label = "PAUSED"
+            run_color = C_NEON_GOLD
+        elif self.simulation.is_running:
+            run_label = "RUNNING"
+            run_color = C_NEON_GREEN
+        else:
+            run_label = "FINISHED"
+            run_color = C_NEON_RED
 
-    def update(self, dt):
-        self._t += dt
-        self.btn_pause.update(dt)
-        self.btn_reset.update(dt)
-        for _, b in self._spd_btns: b.update(dt)
-        # Update pause button label
-        self.btn_pause.text = "▶ RESUME" if self.bridge.is_paused else "⏸ PAUSE"
+        # Compute accurate live queue counts from active NPC entities
+        npcs = self.npcs_provider() if callable(self.npcs_provider) else []
+        if npcs:
+            ticket_count = sum(1 for n in npcs if n.state in (n.TICKET_LINE, n.BUYING_TICKET))
+            usher_count = sum(1 for n in npcs if n.state in (n.USHER_LINE, n.CHECKING_TICKET))
+            snack_count = sum(1 for n in npcs if n.state in (n.SNACK_LINE, n.BUYING_SNACK))
+            seated_count = sum(1 for n in npcs if n.state == n.SEATED)
+            total_active = len([n for n in npcs if not n.has_left])
+            guests_display = f"{seated_count} S | {total_active} T"
+        else:
+            ticket_count = stats.cashier_queue
+            usher_count = stats.usher_queue
+            snack_count = stats.snack_queue
+            guests_display = f"{stats.total_arrived}/{stats.total_seated}"
 
-    def draw(self, surface: pygame.Surface):
-        stats = self.bridge.stats
-        p     = self.player
-
-        # ── Left stats panel ─────────────────────────────────────────────
-        draw_panel(surface, self._left, C_NEON_GOLD, alpha=210, radius=8)
-        x, y = self._left.x + 10, self._left.y + 8
-
-        draw_text(surface, "◆ LIVE STATS ◆", self._tf, C_NEON_GOLD,
-                  (self._left.centerx, y), centered=True)
-        y += 26
-
-        sim_m = int(stats.sim_time); sim_s = int((stats.sim_time%1)*60)
-        draw_text(surface, f"⏱  {sim_m:02d}:{sim_s:02d}", self._sf,
-                  C_TEXT_WHITE, (x, y)); y += 28
-
-        draw_text(surface, f"🧍 Arrived: {stats.total_arrived}", self._lf,
-                  C_TEXT_DIM, (x, y)); y += 18
-        draw_text(surface, f"🪑 Seated:  {stats.total_seated}", self._lf,
-                  C_TEXT_DIM, (x, y)); y += 24
-
-        avg = stats.avg_wait
-        wm, ws = int(avg), int((avg%1)*60)
-        wc = C_GOOD if avg < 8 else C_WARN if avg < 10 else C_BAD
-        draw_text(surface, "AVG WAIT:", self._lf, C_TEXT_DIM, (x, y)); y += 18
-        draw_text(surface, f"  {wm}m {ws:02d}s", self._sf, wc, (x, y)); y += 28
-        # Pulse border if over limit
-        if avg >= 10 and self.bridge.is_running:
-            a = int(180 * abs(math.sin(self._t*3)))
-            pygame.draw.rect(surface, C_BAD, self._left, 2, border_radius=8)
-
-        # Queue bars
-        draw_text(surface, "QUEUES:", self._lf, C_TEXT_DIM, (x, y)); y += 18
-        for label, val, maxv, col in [
-            ("🎟 Cashier", stats.cashier_queue, 15, C_NEON_GOLD),
-            ("🎫 Usher",   stats.usher_queue,    5, C_NEON_PINK),
-            ("🍿 Snack",   stats.snack_queue,    10, C_NEON_CYAN),
-        ]:
-            draw_text(surface, f"{label}: {val}", self._sm, C_TEXT_DIM, (x, y)); y += 14
-            _bar(surface, pygame.Rect(x, y, self._left.w-20, 8), val, maxv, col); y += 16
-
-        # ── Right controls panel ──────────────────────────────────────────
-        draw_panel(surface, self._right, C_NEON_CYAN, alpha=210, radius=8)
-        draw_text(surface, "◆ CONTROLS ◆", self._tf, C_NEON_CYAN,
-                  (self._right.centerx, self._right.y+8), centered=True)
-        self.btn_pause.draw(surface)
-        self.btn_reset.draw(surface)
-        draw_text(surface, "SPEED:", self._sm, C_TEXT_DIM,
-                  (self._right.x+10, self._right.y+80))
-        for v, b in self._spd_btns:
-            if v == self.bridge.speed:
-                pygame.draw.rect(surface, C_NEON_CYAN, b.rect, 2, border_radius=6)
-            b.draw(surface)
-
-        # ── Journey progress strip (top center) ───────────────────────────
-        self._draw_journey(surface)
-
-        # ── Event log ─────────────────────────────────────────────────────
-        draw_panel(surface, self._log_rect, C_PANEL_BORDER, alpha=180, radius=4)
-        visible = self._log[-self.LOG_MAX:]
-        for i, (txt, col) in enumerate(visible):
-            draw_text(surface, txt, self._sm, col,
-                      (self._log_rect.x+8, self._log_rect.y+6+i*14), shadow=False)
-
-        # ── Paused overlay ────────────────────────────────────────────────
-        if self.bridge.is_paused:
-            ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-            ov.fill((0,0,0,100))
-            surface.blit(ov, (0,0))
-            pf = _font("consolas", 52, bold=True)
-            pt = pf.render("⏸  PAUSED", True, C_NEON_GOLD)
-            pt.set_alpha(int(180+75*abs(math.sin(self._t*2))))
-            surface.blit(pt, pt.get_rect(center=(SCREEN_W//2, SCREEN_H//2)))
-
-    def _draw_journey(self, surface):
-        """Progress strip showing player's current stage."""
-        from game.entities.player import Stage
-        p = self.player
-        stages = [
-            ("🎟 Ticket",   p.has_ticket,     C_NEON_GOLD),
-            ("🎫 Checked",  p.ticket_checked, C_NEON_PINK),
-            ("🍿 Snacks",   p.has_food,        C_NEON_CYAN),
-            ("🪑 Seated",   p.stage==Stage.SEATED, C_NEON_GREEN),
+        speed_text = f"{self.simulation.speed}x"
+        capsules = [
+            (pygame.Rect(6, 6, 112, 46), "SIM TIME", f"{minutes:02d}:{seconds:02d}", C_TEXT_WHITE),
+            (pygame.Rect(124, 6, 92, 46), "STATUS", run_label, run_color),
+            (pygame.Rect(222, 6, 68, 46), "SPEED", speed_text, C_NEON_CYAN),
+            (pygame.Rect(296, 6, 104, 46), "GUESTS", guests_display, C_NEON_GOLD),
+            (pygame.Rect(406, 6, 116, 46), "AVG WAIT", f"{wait_minutes}:{wait_seconds:02d}", wait_color),
+            (pygame.Rect(528, 6, 112, 46), "TARGET", "<= 10:00", C_NEON_GREEN),
         ]
-        rect = self._journey_rect
-        draw_panel(surface, rect, C_NEON_GOLD, alpha=190, radius=6)
-        sw = rect.w // len(stages)
-        for i, (label, done, col) in enumerate(stages):
-            ix = rect.x + i*sw + sw//2
-            iy = rect.centery
-            c  = col if done else C_TEXT_DIM
-            draw_text(surface, label, self._sm, c, (ix, iy), centered=True, shadow=False)
+        for rect, title, value, color in capsules:
+            capsule(rect, title, value, color)
+
+        # Accurate Live Queue Status Strip
+        queue_text = (
+            f"Live Queues: Ticket ({ticket_count}) • Usher ({usher_count}) • Concession ({snack_count})"
+        )
+        queue_surf = self._lf.render(queue_text, True, C_NEON_GOLD if (ticket_count + usher_count + snack_count) > 0 else C_TEXT_DIM)
+        queue_panel = pygame.Surface(
+            (queue_surf.get_width() + 16, queue_surf.get_height() + 8), pygame.SRCALPHA
+        )
+        queue_panel.fill((19, 22, 40, 220))
+        queue_panel.blit(queue_surf, (8, 4))
+        queue_x = SCREEN_W // 2 - queue_panel.get_width() // 2
+        surface.blit(queue_panel, (queue_x, 55))
+
+
+        # Live Event Log (bottom-left)
+        if self._log and self._log_t > 0:
+            alpha = min(255, int(255 * (self._log_t / 4.0)))
+            for i, (txt, col) in enumerate(self._log):
+                s = self._lf.render(txt, True, col)
+                s.set_alpha(alpha)
+                surface.blit(s, (12, SCREEN_H - 26 - i * 18))
+
+        # Sandbox Controls Hint (bottom bar)
+        hint_text = "[Click & Drag] Pan Camera  •  [Scroll / +/-] Zoom  •  [WASD / Arrows] Move  •  [Space] Pause  •  [F1] Settings"
+        hint = self._lf.render(hint_text, True, (175, 185, 215))
+        hint_panel = pygame.Surface((hint.get_width() + 16, hint.get_height() + 8), pygame.SRCALPHA)
+        hint_panel.fill((12, 14, 28, 220))
+        pygame.draw.rect(hint_panel, (45, 52, 85), hint_panel.get_rect(), 1, border_radius=4)
+        hint_panel.blit(hint, (8, 4))
+        surface.blit(hint_panel, (SCREEN_W // 2 - hint_panel.get_width() // 2, SCREEN_H - 28))
+

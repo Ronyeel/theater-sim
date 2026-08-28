@@ -1,7 +1,7 @@
 """
-CinePlex Dreams — Cinema Exterior Scene (Scene 1)
-The player starts outside the cinema, walks up the sidewalk past the street,
-and enters through the cinema doors into the theater simulation.
+CinePlex Dreams — Cinema Exterior Cutscene
+Cinematic transition screen: moviegoers walking into the cinema entrance under
+the glowing retro marquee before fading smoothly into the theater simulation.
 """
 import os
 import pygame
@@ -9,13 +9,12 @@ import math
 import random
 from game.settings import (
     SCREEN_W, SCREEN_H, C_BG_DARK, C_NEON_GOLD, C_NEON_CYAN, C_NEON_PINK,
-    C_TEXT_WHITE, C_TEXT_DIM, PLAYER_SPEED, BG_DIR,
+    C_TEXT_WHITE, C_TEXT_DIM, BG_DIR,
 )
 from game.core import asset_loader as AL
 from game.core.particles import ParticleSystem
 from game.entities.npc import moviegoer_sprite
 from game.entities.player import DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_UP
-from game.ui.speech_bubble import DialogPrompt
 
 
 def _font(name, size, bold=False):
@@ -24,15 +23,17 @@ def _font(name, size, bold=False):
 
 
 class ExteriorScreen:
+    """Cinematic exterior cutscene showing guests entering the cinema."""
+
     def __init__(self, go_interior):
         self.go_interior = go_interior
         self._t = 0.0
+        self.duration = 3.2  # Total cutscene duration in seconds
 
         # Load & prepare cinema exterior background
         ext_path = os.path.join(BG_DIR, "outside cinema.png")
         if os.path.exists(ext_path):
             raw = pygame.image.load(ext_path).convert()
-            # Scale to fit full height of screen (720px)
             raw_w, raw_h = raw.get_size()
             self._scale = SCREEN_H / raw_h
             self._bg_w = int(raw_w * self._scale)
@@ -47,27 +48,13 @@ class ExteriorScreen:
             self._bg_h = SCREEN_H
             self._offset_x = 0
 
-        # Player spawn in exterior scene (bottom center on crosswalk)
-        # Scaled coordinates on the exterior background
-        self.px = float(self._offset_x + self._bg_w * 0.50)
-        self.py = float(self._bg_h * 0.88)
-
-        self._vx = 0.0
-        self._vy = 0.0
-        self._direction = DIR_UP
-        self._moving = False
-        self._anim_frame = 0
-        self._anim_timer = 0.0
-
-        # Entrance door trigger zone (center front doors)
+        # Entrance door coordinates
         self.door_x = self._offset_x + self._bg_w * 0.50
-        self.door_y = self._bg_h * 0.70  # Door entrance position
+        self.door_y = self._bg_h * 0.70
 
-        # Interaction & UI
-        self.dialog = DialogPrompt()
+        # Particles & Fonts
         self.particles = ParticleSystem()
-        self._title_font = _font("consolas", 18, bold=True)
-        self._hint_font = _font("consolas", 14)
+        self._hint_font = _font("consolas", 12)
 
         # Transition state
         self._entering = False
@@ -75,153 +62,104 @@ class ExteriorScreen:
         self._fade_surf = pygame.Surface((SCREEN_W, SCREEN_H))
         self._fade_surf.fill((0, 0, 0))
 
-        # Ambient visitors have different lanes, speeds and destinations so
-        # the forecourt feels like a small crowd, not a looping backdrop.
+        # Animated cinematic pedestrians entering the cinema
         self._pedestrians = [
-            self._make_pedestrian(0.22, 0.76, DIR_RIGHT, 25, 2),
-            self._make_pedestrian(0.78, 0.78, DIR_LEFT, 20, 19),
-            self._make_pedestrian(0.35, 0.85, DIR_RIGHT, 15, 34),
-            self._make_pedestrian(0.66, 0.89, DIR_LEFT, 18, 45),
+            # Group walking up into the front doors
+            self._make_cinematic_guest(0.50, 0.90, target_door=True, speed=38, character_id=6, delay=0.0),
+            self._make_cinematic_guest(0.46, 0.94, target_door=True, speed=34, character_id=14, delay=0.4),
+            self._make_cinematic_guest(0.54, 0.96, target_door=True, speed=36, character_id=22, delay=0.7),
+            self._make_cinematic_guest(0.48, 0.98, target_door=True, speed=32, character_id=38, delay=1.1),
+            # Sidewalk pedestrians strolling across
+            self._make_cinematic_guest(0.18, 0.77, target_door=False, direction=DIR_RIGHT, speed=26, character_id=2),
+            self._make_cinematic_guest(0.82, 0.78, target_door=False, direction=DIR_LEFT, speed=24, character_id=19),
+            self._make_cinematic_guest(0.30, 0.86, target_door=False, direction=DIR_RIGHT, speed=20, character_id=34),
+            self._make_cinematic_guest(0.72, 0.88, target_door=False, direction=DIR_LEFT, speed=22, character_id=45),
         ]
 
-    def _make_pedestrian(self, x_ratio, y_ratio, direction, speed, character_id):
-        """Create a visitor that strolls, pauses, and occasionally changes lane."""
+    def _make_cinematic_guest(self, x_ratio, y_ratio, target_door=False, direction=DIR_UP, speed=30, character_id=0, delay=0.0):
         return {
             "x": self._offset_x + self._bg_w * x_ratio,
             "y": self._bg_h * y_ratio,
-            "home_y": self._bg_h * y_ratio,
+            "target_door": target_door,
             "dir": direction,
-            "spd": speed * random.uniform(0.85, 1.15),
-            "fr": random.randrange(3),
-            "anim": random.uniform(0.0, 0.14),
-            "pause": random.uniform(0.2, 1.6),
-            "turn_at": random.uniform(2.2, 5.0),
-            # Use the supplied moviegoer character sheets here too, rather
-            # than the simple generated figure used by the old exterior.
+            "spd": speed,
+            "fr": 0,
+            "anim": 0.0,
+            "delay": delay,
+            "entered": False,
             "character_id": character_id,
         }
 
     def _update_pedestrians(self, dt):
-        left_edge = self._offset_x + self._bg_w * 0.16
-        right_edge = self._offset_x + self._bg_w * 0.84
         for ped in self._pedestrians:
-            if ped["pause"] > 0:
-                ped["pause"] -= dt
-                ped["fr"] = 0
+            if ped["delay"] > 0:
+                ped["delay"] -= dt
                 continue
 
-            ped["turn_at"] -= dt
-            ped["x"] += (ped["spd"] if ped["dir"] == DIR_RIGHT else -ped["spd"]) * dt
-            # A tiny lane drift makes the group feel less locked to a grid.
-            ped["y"] = ped["home_y"] + math.sin(self._t * 1.3 + ped["character_id"]) * 3
-            ped["anim"] += dt
-            if ped["anim"] >= 0.16:
-                ped["anim"] = 0.0
-                ped["fr"] = (ped["fr"] + 1) % 3
+            if ped["entered"]:
+                continue
 
-            reached_edge = ped["x"] <= left_edge or ped["x"] >= right_edge
-            if reached_edge or ped["turn_at"] <= 0:
-                ped["dir"] = DIR_LEFT if ped["dir"] == DIR_RIGHT else DIR_RIGHT
-                ped["x"] = max(left_edge, min(right_edge, ped["x"]))
-                ped["turn_at"] = random.uniform(2.5, 5.5)
-                # Some visitors stop to check the marquee before continuing.
-                if random.random() < 0.45:
-                    ped["pause"] = random.uniform(0.45, 1.5)
+            if ped["target_door"]:
+                # Walk UP toward center doors
+                target_x = self.door_x
+                target_y = self.door_y
+                dx = target_x - ped["x"]
+                dy = target_y - ped["y"]
+                dist = math.hypot(dx, dy)
+
+                if dist < 12:
+                    ped["entered"] = True
+                    self.particles.burst(self.door_x, self.door_y - 20, C_NEON_GOLD, count=14, speed=90)
+                else:
+                    ped["x"] += (dx / dist) * ped["spd"] * dt
+                    ped["y"] += (dy / dist) * ped["spd"] * dt
+                    ped["dir"] = DIR_UP
+                    ped["anim"] += dt
+                    if ped["anim"] >= 0.14:
+                        ped["anim"] = 0.0
+                        ped["fr"] = (ped["fr"] + 1) % 4
+            else:
+                # Stroll sideways
+                left_edge = self._offset_x + self._bg_w * 0.16
+                right_edge = self._offset_x + self._bg_w * 0.84
+                ped["x"] += (ped["spd"] if ped["dir"] == DIR_RIGHT else -ped["spd"]) * dt
+                ped["anim"] += dt
+                if ped["anim"] >= 0.16:
+                    ped["anim"] = 0.0
+                    ped["fr"] = (ped["fr"] + 1) % 4
+
+                if ped["x"] <= left_edge:
+                    ped["dir"] = DIR_RIGHT
+                elif ped["x"] >= right_edge:
+                    ped["dir"] = DIR_LEFT
 
     def handle_event(self, evt):
-        if self._entering:
-            return
-        if evt.type == pygame.KEYDOWN:
-            if evt.key == pygame.K_e or evt.key == pygame.K_RETURN:
-                # Check if near door
-                dist = math.hypot(self.px - self.door_x, self.py - self.door_y)
-                if dist < 65:
-                    self._start_enter()
+        # Allow skipping cutscene on any key or click
+        if evt.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+            self._start_enter()
 
     def _start_enter(self):
-        if not self._entering:
-            self._entering = True
-            self.particles.burst(self.door_x, self.door_y - 20, C_NEON_GOLD, count=25, speed=120)
-            self.particles.confetti(self.door_x, self.door_y - 30, count=20)
+        self._entering = True
 
     def update(self, dt: float):
         self._t += dt
         self.particles.update(dt)
-
-        if self._entering:
-            self._fade_alpha = min(255.0, self._fade_alpha + 320 * dt)
-            if self._fade_alpha >= 255.0:
-                self.go_interior()
-            return
-
-        # Player Movement
-        keys = pygame.key.get_pressed()
-        dx = dy = 0
-        if keys[pygame.K_w] or keys[pygame.K_UP]:    dy = -1
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]:  dy =  1
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:  dx = -1
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]: dx =  1
-
-        if dx != 0 and dy != 0:
-            dx *= 0.707
-            dy *= 0.707
-
-        self._vx = dx * (PLAYER_SPEED * 1.1)
-        self._vy = dy * (PLAYER_SPEED * 1.1)
-        self._moving = (dx != 0 or dy != 0)
-
-        if dx < 0:   self._direction = DIR_LEFT
-        elif dx > 0: self._direction = DIR_RIGHT
-        elif dy < 0: self._direction = DIR_UP
-        elif dy > 0: self._direction = DIR_DOWN
-
-        # Move with exterior boundary constraints
-        new_x = self.px + self._vx * dt
-        new_y = self.py + self._vy * dt
-
-        # Sidewalk & Plaza bounds
-        min_x = self._offset_x + self._bg_w * 0.12
-        max_x = self._offset_x + self._bg_w * 0.88
-        min_y = self._bg_h * 0.68  # Can't walk past doors
-        max_y = self._bg_h * 0.94  # Street limit
-
-        self.px = max(min_x, min(max_x, new_x))
-        self.py = max(min_y, min(max_y, new_y))
-
-        # Animation
-        if self._moving:
-            self._anim_timer += dt
-            if self._anim_timer >= 0.14:
-                self._anim_timer = 0
-                self._anim_frame = (self._anim_frame + 1) % 4
-        else:
-            self._anim_frame = 0
-
         self._update_pedestrians(dt)
 
-        # Door proximity check
-        dist = math.hypot(self.px - self.door_x, self.py - self.door_y)
-        if dist < 65:
-            self.dialog.show("[E] ENTER CINEMA")
-            # Auto-enter if walking right into the center doorway
-            if self.py <= self._bg_h * 0.70:
-                self._start_enter()
-        else:
-            self.dialog.hide()
-
-        self.dialog.update(dt)
+        # Automatic transition after cutscene duration
+        if self._t >= (self.duration - 0.8) or self._entering:
+            self._fade_alpha = min(255.0, self._fade_alpha + 360 * dt)
+            if self._fade_alpha >= 255.0:
+                self.go_interior()
 
     def draw(self, surface: pygame.Surface):
-        # Fill black / dark background pillars
+        # Fill black / dark backdrop
         surface.fill(C_BG_DARK)
 
-        # Draw decorative background city ambiance on the sides
+        # Draw decorative glowing pillars on widescreen sides
         for x_pillar in (0, self._offset_x + self._bg_w):
             w_pillar = (SCREEN_W - self._bg_w) // 2 + 2
             pygame.draw.rect(surface, (18, 12, 32), (x_pillar, 0, w_pillar, SCREEN_H))
-            # Glowing side neon lines
-            pulse = 0.5 + 0.5 * math.sin(self._t * 3.0)
-            neon_col = (*C_NEON_PINK[:3], int(120 * pulse))
             line_x = self._offset_x if x_pillar == 0 else self._offset_x + self._bg_w
             pygame.draw.line(surface, C_NEON_GOLD, (line_x, 0), (line_x, SCREEN_H), 2)
 
@@ -237,58 +175,37 @@ class ExteriorScreen:
             int(self._bg_h * 0.14)
         )
         glow = pygame.Surface((glow_rect.w, glow_rect.h), pygame.SRCALPHA)
-        glow.fill((*C_NEON_GOLD[:3], int(25 * flicker)))
+        glow.fill((*C_NEON_GOLD[:3], int(28 * flicker)))
         surface.blit(glow, glow_rect.topleft)
 
-        # Draw Door Entrance Pulse Ring
+        # Draw Door Entrance Pulse
         pulse_r = int(18 + 6 * math.sin(self._t * 3.5))
         door_pulse = pygame.Surface((pulse_r * 2, pulse_r * 2), pygame.SRCALPHA)
         pygame.draw.circle(door_pulse, (*C_NEON_GOLD[:3], 90), (pulse_r, pulse_r), pulse_r, 2)
         surface.blit(door_pulse, (int(self.door_x - pulse_r), int(self.door_y - pulse_r)))
 
-        # Draw pedestrians from back to front, with a small shadow to anchor
-        # them on the sidewalk.
+        # Draw walking pedestrians (sorted by Y for natural depth)
         for ped in sorted(self._pedestrians, key=lambda item: item["y"]):
+            if ped["delay"] > 0 or ped["entered"]:
+                continue
             npc_s = moviegoer_sprite(ped["character_id"], ped["fr"], ped["dir"])
             shadow = pygame.Surface((22, 7), pygame.SRCALPHA)
-            pygame.draw.ellipse(shadow, (0, 0, 0, 65), shadow.get_rect())
+            pygame.draw.ellipse(shadow, (0, 0, 0, 75), shadow.get_rect())
             surface.blit(shadow, (int(ped["x"]) - 11, int(ped["y"]) - 4))
-            surface.blit(npc_s, (int(ped["x"]) - npc_s.get_width()//2, int(ped["y"]) - npc_s.get_height()))
-
-        # Draw Player Drop Shadow
-        shadow = pygame.Surface((28, 12), pygame.SRCALPHA)
-        pygame.draw.ellipse(shadow, (0, 0, 0, 90), (0, 0, 28, 12))
-        surface.blit(shadow, (int(self.px) - 14, int(self.py) - 6))
-
-        # Draw Player Sprite
-        sprite = AL.player_sprite(self._anim_frame, self._direction)
-        sw, sh = sprite.get_size()
-        surface.blit(sprite, (int(self.px) - sw // 2, int(self.py) - sh))
+            surface.blit(npc_s, (int(ped["x"]) - npc_s.get_width() // 2, int(ped["y"]) - npc_s.get_height()))
 
         # Particles
         class ScreenCam:
             def world_to_screen(self, x, y): return x, y
         self.particles.draw(surface, ScreenCam())
 
-        # Dialog Prompt [E] ENTER CINEMA
-        self.dialog.draw(surface)
+        # Subtle Skip Hint (bottom-right)
+        hint_alpha = int(140 + 60 * math.sin(self._t * 2.0))
+        hint = self._hint_font.render("[Press Any Key / Click to Skip]", True, (190, 190, 220))
+        hint.set_alpha(hint_alpha)
+        surface.blit(hint, (SCREEN_W - hint.get_width() - 16, SCREEN_H - 24))
 
-        # Top Banner / Objective Banner
-        banner = pygame.Rect(SCREEN_W // 2 - 220, 16, 440, 38)
-        bg_bar = pygame.Surface((banner.w, banner.h), pygame.SRCALPHA)
-        bg_bar.fill((15, 10, 30, 210))
-        surface.blit(bg_bar, banner.topleft)
-        pygame.draw.rect(surface, C_NEON_GOLD, banner, 2, border_radius=6)
-
-        txt = self._title_font.render("🎬 ARRIVAL: CINEMA ENTRANCE", True, C_NEON_GOLD)
-        surface.blit(txt, txt.get_rect(center=(SCREEN_W // 2, banner.centery)))
-
-        # Bottom Walk Hint
-        if not self._entering and not self.dialog._visible:
-            hint = self._hint_font.render("▲ Walk up to the cinema doors to enter", True, C_TEXT_DIM)
-            surface.blit(hint, hint.get_rect(center=(SCREEN_W // 2, SCREEN_H - 30)))
-
-        # Fade Out Overlay
+        # Smooth Fade Out Overlay
         if self._fade_alpha > 0:
             self._fade_surf.set_alpha(int(self._fade_alpha))
             surface.blit(self._fade_surf, (0, 0))

@@ -133,6 +133,9 @@ class TileMap:
     def __init__(self):
         self._anim_t = 0.0
         self._tile_cache: dict[int, pygame.Surface] = {}
+        self._glow_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        self._dim_seat_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        self._dim_seat_surf.fill((0, 0, 0, 18))
 
     def _get_tile_surf(self, tile_id: int) -> pygame.Surface | None:
         if tile_id in self._tile_cache:
@@ -154,6 +157,8 @@ class TileMap:
         row_start = max(0, cam_y // TILE_SIZE)
         row_end   = min(MAP_ROWS, row_start + surface.get_height() // TILE_SIZE + 2)
 
+        glow = self._glow_surf
+
         for row in range(row_start, row_end):
             for col in range(col_start, col_end):
                 tile_id = THEATER_MAP[row][col]
@@ -169,48 +174,59 @@ class TileMap:
                     dy = sy - (surf.get_height() - TILE_SIZE)
                     surface.blit(surf, (sx, dy))
 
-                # ── Animated effects ──────────────────────────────────
+                # ── Animated effects (reusing preallocated surface) ───
 
                 # Neon marquee flicker
                 if tile_id == TILE_NEON:
                     flicker = 0.6 + 0.4 * math.sin(self._anim_t * 4.0 + col * 0.7)
-                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
                     glow.fill((*C_NEON_PINK[:3], int(30 * flicker)))
                     surface.blit(glow, (sx, sy))
 
                 # Cinema screen glow — pulsing blue/white light
-                if tile_id == TILE_SCREEN:
-                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                elif tile_id == TILE_SCREEN:
                     pulse = int(20 + 15 * math.sin(self._anim_t * 1.5))
                     glow.fill((*C_NEON_CYAN[:3], pulse))
                     surface.blit(glow, (sx, sy))
 
                 # Theater seat area — subtle darkness to simulate dim auditorium
-                if tile_id == TILE_SEAT:
-                    dim = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-                    dim.fill((0, 0, 0, 18))
-                    surface.blit(dim, (sx, sy))
+                elif tile_id == TILE_SEAT:
+                    surface.blit(self._dim_seat_surf, (sx, sy))
 
                 # Carpet aisle glow — faint warm light from screen
-                if tile_id == TILE_CARPET and 1 <= row <= 6:
-                    # Gradient: brighter closer to screen (row 1)
+                elif tile_id == TILE_CARPET and 1 <= row <= 6:
                     dist = (row - 1) / 5.0
                     alpha = int(12 * (1 - dist) + 4 * math.sin(self._anim_t * 1.2))
-                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
                     glow.fill((100, 160, 220, max(0, alpha)))
                     surface.blit(glow, (sx, sy))
 
                 # Poster spotlight
-                if tile_id == TILE_POSTER:
-                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                elif tile_id == TILE_POSTER:
                     pulse = int(8 + 6 * math.sin(self._anim_t * 2.0 + col * 1.3))
                     glow.fill((*C_NEON_GOLD[:3], pulse))
                     surface.blit(glow, (sx, sy))
 
                 # Corridor floor — faint edge lighting
-                if tile_id == TILE_CORRIDOR:
-                    glow = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                elif tile_id == TILE_CORRIDOR:
                     a = int(6 + 4 * math.sin(self._anim_t * 0.8 + col * 0.5))
                     glow.fill((80, 50, 120, a))
                     surface.blit(glow, (sx, sy))
+
+    def draw_seats(self, surface: pygame.Surface, camera):
+        """Draw auditorium seats in a secondary pass on top of seated NPCs so only heads peek out."""
+        cam_x, cam_y = int(camera.x), int(camera.y)
+        col_start = max(0, cam_x // TILE_SIZE)
+        col_end   = min(MAP_COLS, col_start + surface.get_width() // TILE_SIZE + 2)
+        row_start = max(0, cam_y // TILE_SIZE)
+        row_end   = min(MAP_ROWS, row_start + surface.get_height() // TILE_SIZE + 2)
+
+        for row in range(row_start, row_end):
+            for col in range(col_start, col_end):
+                if THEATER_MAP[row][col] == TILE_SEAT:
+                    sx = col * TILE_SIZE - cam_x
+                    sy = row * TILE_SIZE - cam_y
+                    surf = self._get_tile_surf(TILE_SEAT)
+                    if surf:
+                        dy = sy - (surf.get_height() - TILE_SIZE)
+                        surface.blit(surf, (sx, dy))
+                        surface.blit(self._dim_seat_surf, (sx, sy))
 

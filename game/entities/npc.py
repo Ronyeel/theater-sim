@@ -10,10 +10,11 @@ import secrets
 import math
 import heapq
 from game.settings import (
-    TILE_SIZE, SPRITES_DIR, CASHIER_DESK_COLS, USHER_DESK_COLS,
+    TILE_SIZE, MAP_COLS, SPRITES_DIR, CASHIER_DESK_COLS, USHER_DESK_COLS,
     SNACK_DESK_COLS, SEAT_COLS, SEAT_ROWS, TILE_SEAT,
     USHER_DESK_ROW, USHER_PASSAGE_COLS, DEBUG_NPC_COLLISION_RANGE,
 )
+
 from game.core.tilemap import is_walkable, tile_at
 
 # ── Spritesheet constants ──────────────────────────────────────────────────
@@ -46,13 +47,32 @@ _CHARACTERS_PER_SHEET = 16
 _npc_sheets: dict[int, pygame.Surface | None] = {}
 _npc_frame_cache: dict[str, pygame.Surface] = {}
 _sprite_rng = secrets.SystemRandom()
+_path_cache: dict[tuple, list[tuple[int, int]]] = {}
+_shadow_surf: pygame.Surface | None = None
+_queue_counter: int = 0
+
+
+def _next_queue_seq() -> int:
+    global _queue_counter
+    _queue_counter += 1
+    return _queue_counter
+
+
+def _get_shadow_surf() -> pygame.Surface:
+
+    global _shadow_surf
+    if _shadow_surf is None:
+        _shadow_surf = pygame.Surface((_NPC_DRAW_W - 8, 6), pygame.SRCALPHA)
+        pygame.draw.ellipse(_shadow_surf, (0, 0, 0, 40), _shadow_surf.get_rect())
+    return _shadow_surf
 
 # Scale target for NPC sprites (match player roughly)
 _NPC_DRAW_W = 42
 _NPC_DRAW_H = 58
-# Footprint radius for NPC-to-NPC yielding.  A smaller value lets guests pass
-# through the broad lobby without stopping at an unrealistic visible gap.
-_NPC_COLLISION_RADIUS = 8
+# Footprint radius for NPC-to-NPC yielding. Reduced to 6 for tighter, more realistic
+# queue packing and smooth corridor movement without large visible gaps.
+_NPC_COLLISION_RADIUS = 6
+
 
 # Only use the tiles that are actually cinema seats.  SEAT_COLS also spans
 # the centre aisle, so filtering the map prevents NPCs from sitting there.
@@ -63,18 +83,32 @@ _AUDITORIUM_SEATS = tuple(
     if tile_at(col, row) == TILE_SEAT
 )
 
+# Open lobby side wings where long ticket queues stage without blocking center entrance
+_LEFT_LOUNGE_TILES = (
+    (2, 20), (1, 20), (1, 21),
+    (2, 21), (2, 22), (1, 22),
+    (4, 22), (5, 22), (6, 22),
+    (2, 19), (1, 19), (4, 20),
+)
+
+_RIGHT_LOUNGE_TILES = (
+    (17, 20), (18, 20), (18, 21),
+    (17, 21), (17, 22), (18, 22),
+    (14, 22), (13, 22), (12, 22),
+    (17, 19), (18, 19), (14, 20),
+)
+
+
+
 
 def _inside_npc_service_area(col: int, row: int) -> bool:
-    """Keep moviegoers in the central, customer-facing circulation area."""
-    # These invisible bounds follow the marked lobby lanes: wide around
-    # concessions/checkpoint, narrow behind the ticket kiosks, then centered
-    # around the queues and exit. The player is deliberately unaffected.
+    """Keep moviegoers in the customer-facing circulation area."""
     if 10 <= row <= 14:
-        return 3 <= col <= 14
+        return 2 <= col <= 17
     if 15 <= row <= 17:
         return 2 <= col <= 17
     if 18 <= row <= 24:
-        return 4 <= col <= 13
+        return 1 <= col <= 18
     return True
 
 
@@ -88,6 +122,13 @@ def _tile_path(start: tuple[int, int], goal: tuple[int, int],
         return [start]
     if goal in blocked or not can_walk(*start) or not can_walk(*goal):
         return []
+
+    # Fast path cache when standard walking rules apply
+    cache_key = None
+    if can_walk is is_walkable:
+        cache_key = (start, goal, tuple(sorted(blocked)) if blocked else ())
+        if cache_key in _path_cache:
+            return list(_path_cache[cache_key])
 
     def neighbours(col: int, row: int):
         dx = goal[0] - col
@@ -128,13 +169,17 @@ def _tile_path(start: tuple[int, int], goal: tuple[int, int],
                 path = [goal]
                 while path[-1] != start:
                     path.append(came_from[path[-1]])
-                return list(reversed(path))
+                res = list(reversed(path))
+                if cache_key is not None:
+                    _path_cache[cache_key] = res
+                return list(res)
             insertion_order += 1
             heapq.heappush(
                 frontier,
                 (next_cost + distance(nxt), next_cost, insertion_order, nxt),
             )
     return []
+
 
 
 def _load_npc_sheet(sheet_idx: int) -> pygame.Surface | None:
@@ -304,11 +349,15 @@ class NPC:
 
         # Movement and journey state
         self.state = self.TICKET_LINE
+        self.ticket_seq = _next_queue_seq()
+        self.usher_seq = 0
+        self.snack_seq = 0
         self.direction = _DIR_DOWN
         self.speed = random.uniform(40, 65)  # slower than player
         self._route: list[tuple[int, int]] = []
         self._target_x = self.x
         self._target_y = self.y
+
         self._service_timer = 0.0
         self._service_duration = 0.0
         self._vendor_text = ""
@@ -316,10 +365,14 @@ class NPC:
         self._collision_debug_target: tuple[float, float] | None = None
         self._detour_cooldown = 0.0
         self._occupied_seat_tiles: set[tuple[int, int]] = set()
+        # Queue impatience (reneging): guests who wait too long leave
+        self._wait_patience = random.uniform(28.0, 60.0)
+        self._time_waiting = 0.0
         # Track a physical block separately from intentional service waits.
         self._stalled_for = 0.0
         self._recovery_cooldown = 0.0
         self._watch_time = 0.0
+
         # A few guests lose interest early, while others stay until the
         # session ends.  This range is long enough to let them settle in,
         # but short enough for the behaviour to be visible during play.
@@ -352,12 +405,7 @@ class NPC:
         self.server_capacity = max(0, min(len(SNACK_DESK_COLS), servers))
 
     def _choose_ticket_lane(self, nearby_npcs: list["NPC"] | None):
-        """Reserve the least-busy reachable ticket counter before moving.
-
-        A ticket lane used to be assigned only from the arrival number.  That
-        can leave several late arrivals in one vertical line while another
-        booth is open.  This uses the guests actually at the counters instead.
-        """
+        """Reserve the least-busy reachable ticket counter before moving."""
         active_states = {self.TICKET_LINE, self.BUYING_TICKET}
         start = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
         choices = []
@@ -369,17 +417,34 @@ class NPC:
                 and other.ticket_lane == lane
             ]
             depth = len(occupants)
-            if depth <= 2:
-                target = col, 20 + depth
-            else:
-                direction = -1 if col < 10 else 1
-                target = max(4, min(13, col + direction * (depth - 2))), 22
+            target = self._calc_ticket_wait_tile(col, depth)
             route = _tile_path(start, target, self._gate_blocked_tiles(), self._can_walk)
             if route:
                 choices.append((len(occupants), len(route), lane, depth))
         if not choices:
+            self._speech_text = "Ticket counters are closed!"
+            self._start_exit_route()
             return
         _, _, lane, depth = min(choices, key=lambda choice: choice[:3])
+
+        # Realistic queue balking: when lines are excessively long, some guests leave
+        balk_prob = 0.0
+        if depth >= 10:
+            balk_prob = 0.70
+        elif depth >= 6:
+            balk_prob = 0.35
+        elif depth >= 4:
+            balk_prob = 0.15
+
+        if random.random() < balk_prob:
+            self._speech_text = random.choice([
+                "Lines are way too long!",
+                "Too packed today, I'll pass.",
+                "I'll catch a movie another time.",
+            ])
+            self._start_exit_route()
+            return
+
         self.ticket_lane = lane
         self.ticket_line_depth = depth
         # The chosen ticket side determines the compatible usher checkpoint.
@@ -408,22 +473,40 @@ class NPC:
             13: 12, # gap before booth 4
         }.get(self._cashier_col(), 11)
 
+    @staticmethod
+    def _calc_ticket_wait_tile(col: int, depth: int) -> tuple[int, int]:
+        """Calculate a unique queue slot that gathers in the side wings when lines are long.
+
+        Kiosks 4, 7 spill leftward into West Lounge (cols 1..2, rows 19..22).
+        Kiosks 10, 13 spill rightward into East Lounge (cols 17..18, rows 19..22).
+        Central corridor (cols 8..11) remains completely clear.
+        """
+        if depth == 0:
+            return col, 19
+        if depth == 1:
+            return col, 20
+        if depth == 2:
+            return col, 22
+
+        if col < 10:
+            tiles = _LEFT_LOUNGE_TILES
+        else:
+            tiles = _RIGHT_LOUNGE_TILES
+
+        idx = depth - 3
+        if idx < len(tiles):
+            return tiles[idx]
+        return tiles[idx % len(tiles)]
+
+
     def _ticket_wait_tile(self, depth: int | None = None) -> tuple[int, int]:
         """Return a walkable ticket-line slot for the requested live depth."""
         col = self._cashier_col()
         depth = self.ticket_line_depth if depth is None else depth
-        if depth <= 2:
-            return col, 20 + depth
-        direction = -1 if col < 10 else 1
-        return max(4, min(13, col + direction * (depth - 2))), 22
+        return self._calc_ticket_wait_tile(col, depth)
 
     def _ticket_follow_tile(self, depth: int) -> tuple[int, int]:
-        """Queue slot that keeps the counter approach tile open.
-
-        Row 19 is the only path from the line to the counter on row 18.  A
-        follower standing there can trap the active customer, so the first
-        waiting position must stay on row 20.
-        """
+        """Queue slot that keeps the counter approach tile open."""
         return self._ticket_wait_tile(depth)
 
     def _snack_col(self) -> int:
@@ -509,17 +592,28 @@ class NPC:
             return max(1, min(18, col + direction * depth)), 12
         return max(1, min(18, col + direction * (depth - 4))), 13
 
+    @staticmethod
+    def _calc_usher_wait_tile(usher_col: int, depth: int) -> tuple[int, int]:
+        """Return a walkable staging tile for this NPC's usher queue position.
+
+        Left booth (col 7) queues leftward along row 15 (in front of ropes): 7 -> 6 -> 5 -> 4 -> 3 -> 2 -> 1.
+        Right booth (col 12) queues rightward along row 15 (in front of ropes): 12 -> 13 -> 14 -> 15 -> 16 -> 17 -> 18.
+        Deep lines (depth > 6) snake onto row 16.
+        """
+        direction = -1 if usher_col < 10 else 1
+        if depth == 0:
+            return usher_col, 15
+        if depth <= 6:
+            col = usher_col + direction * depth
+            return max(1, min(18, col)), 15
+        # Continue snaking on row 16
+        col = (usher_col + direction * 6) - direction * (depth - 6)
+        return max(1, min(18, col)), 16
+
     def _usher_wait_tile(self, depth: int | None = None) -> tuple[int, int]:
         """Return a walkable staging tile for this NPC's usher queue position."""
         queue_position = self.usher_line_depth if depth is None else depth
-        usher_col = self._usher_col()
-        if queue_position <= 5:
-            return max(1, min(18, usher_col + (-1 if usher_col < 10 else 1)
-                              * queue_position)), 15
-        # Continue on row 16 once the walkway row is full. The old hard cap
-        # at columns 5/13 put every later guest onto one tile.
-        direction = -1 if usher_col < 10 else 1
-        return max(1, min(18, usher_col + direction * (queue_position - 5))), 16
+        return self._calc_usher_wait_tile(self._usher_col(), queue_position)
 
     def _choose_usher_lane(self, nearby_npcs: list["NPC"] | None):
         """Route ticket holders to the least-busy reachable usher desk."""
@@ -534,11 +628,7 @@ class NPC:
                 and other.usher_lane == lane
             ]
             depth = len(occupants)
-            if depth == 0:
-                target = col, 15
-            else:
-                direction = -1 if col < 10 else 1
-                target = max(5, min(13, col + direction * (depth - 1))), 16
+            target = self._calc_usher_wait_tile(col, depth)
             route = _tile_path(start, target, self._gate_blocked_tiles(), self._can_walk)
             if route:
                 choices.append((len(occupants), len(route), lane, depth))
@@ -547,6 +637,7 @@ class NPC:
         _, _, lane, depth = min(choices, key=lambda choice: choice[:3])
         self.usher_lane = lane
         self.usher_line_depth = depth
+
 
     def _usher_wait_route(self) -> list[tuple[int, int]]:
         # `_set_route` uses breadth-first search, so one final target gives
@@ -618,6 +709,25 @@ class NPC:
             self._target_x = self.x
             self._target_y = self.y
 
+    def _orient_for_queue(self):
+        """Face towards the counter/staff/queue line when standing in line."""
+        if self.state in (self.BUYING_TICKET, self.BUYING_SNACK, self.CHECKING_TICKET):
+            self.direction = _DIR_UP
+        elif self.state == self.TICKET_LINE:
+            if self.ticket_line_depth <= 3:
+                self.direction = _DIR_UP
+            else:
+                self.direction = _DIR_LEFT if self._cashier_col() >= 10 else _DIR_RIGHT
+        elif self.state == self.USHER_LINE:
+            # Left booth (col 7) queue extends left along row 15, so NPCs face right towards booth
+            # Right booth (col 12) queue extends right along row 15, so NPCs face left towards booth
+            if self.usher_line_depth <= 6:
+                self.direction = _DIR_RIGHT if self._usher_col() < 10 else _DIR_LEFT
+            else:
+                self.direction = _DIR_LEFT if self._usher_col() < 10 else _DIR_RIGHT
+        elif self.state == self.SNACK_LINE:
+            self.direction = _DIR_UP
+
     def _set_state(self, state: str, route: list[tuple[int, int]] | None = None,
                    service_time: float = 0.0):
         self.state = state
@@ -627,6 +737,7 @@ class NPC:
         self._service_duration = service_time
         if route is not None:
             self._set_route(route)
+
 
     def _has_queue_leader(self, nearby_npcs: list["NPC"] | None,
                           lane_count: int, active_states: set[str]) -> bool:
@@ -640,16 +751,35 @@ class NPC:
             return []
         if lane_count == len(USHER_DESK_COLS):
             lane = self.usher_lane
+            def is_leader(other):
+                if not (other.usher_seq < self.usher_seq or (
+                        other.usher_seq == self.usher_seq and other.queue_slot < self.queue_slot)):
+                    return False
+                # If self is already at the usher line (row <= 16), a guest still in the lobby (row >= 17)
+                # does not block self from proceeding (first-come, first-served).
+                if self.y <= 16.5 * TILE_SIZE and other.y > 16.5 * TILE_SIZE and other.state != self.CHECKING_TICKET:
+                    return False
+                return True
         elif lane_count == len(SNACK_DESK_COLS):
             lane = self.snack_lane
+            def is_leader(other):
+                if not (other.snack_seq < self.snack_seq or (
+                        other.snack_seq == self.snack_seq and other.queue_slot < self.queue_slot)):
+                    return False
+                if self.y <= 13.5 * TILE_SIZE and other.y > 13.5 * TILE_SIZE and other.state != self.BUYING_SNACK:
+                    return False
+                return True
         else:
             lane = self.ticket_lane
+            is_leader = lambda other: other.ticket_seq < self.ticket_seq or (
+                other.ticket_seq == self.ticket_seq and other.queue_slot < self.queue_slot)
+
         return [
             other
             for other in nearby_npcs
             if other is not self
             and other.spawn_delay <= 0
-            and other.queue_slot < self.queue_slot
+            and is_leader(other)
             and (
                 (other.usher_lane if lane_count == len(USHER_DESK_COLS)
                  else other.snack_lane if lane_count == len(SNACK_DESK_COLS)
@@ -657,6 +787,8 @@ class NPC:
             )
             and other.state in active_states
         ]
+
+
 
     def _arrive_at_step(self, nearby_npcs: list["NPC"] | None = None):
         """Advance only after reaching the front of each line or destination."""
@@ -683,9 +815,22 @@ class NPC:
                 return
             leaders = self._queue_leaders(
                 nearby_npcs, len(USHER_DESK_COLS),
-                {self.USHER_LINE, self.CHECKING_TICKET})
+                {self.USHER_LINE})
             if leaders:
                 target = self._usher_wait_tile(len(leaders))
+                current = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
+                if current != target:
+                    self._set_route([target])
+                return
+            # Before stepping up to CHECKING_TICKET, verify the desk is clear of other guests
+            desk_occupied = any(
+                other is not self and not other.has_left
+                and other.state == self.CHECKING_TICKET
+                and other.usher_lane == self.usher_lane
+                for other in nearby_npcs or []
+            )
+            if desk_occupied:
+                target = self._usher_wait_tile(1)
                 current = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
                 if current != target:
                     self._set_route([target])
@@ -699,14 +844,25 @@ class NPC:
         elif self.state == self.SNACK_LINE:
             if self.server_capacity == 0:
                 return
+            # Only count SNACK_LINE NPCs as leaders — BUYING_SNACK are at the counter.
             leaders = self._queue_leaders(
                 nearby_npcs, len(SNACK_DESK_COLS),
-                {self.SNACK_LINE, self.BUYING_SNACK})
+                {self.SNACK_LINE})
             if leaders:
-                # The active customer is already at row 11, not in a floor
-                # queue slot, so do not count it when selecting this slot.
                 waiting = sum(other.state == self.SNACK_LINE for other in leaders)
                 target = self._snack_wait_tile(waiting)
+                current = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
+                if current != target:
+                    self._set_route([target])
+                return
+            desk_occupied = any(
+                other is not self and not other.has_left
+                and other.state == self.BUYING_SNACK
+                and other.snack_lane == self.snack_lane
+                for other in nearby_npcs or []
+            )
+            if desk_occupied:
+                target = self._snack_wait_tile(1)
                 current = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
                 if current != target:
                     self._set_route([target])
@@ -728,6 +884,8 @@ class NPC:
             # the old claim and select a currently clear alternative.
             if self._seat_is_clear(self.seat, nearby_npcs):
                 self._set_state(self.SEATED)
+                self.direction = _DIR_UP
+                self._frame = 0
             else:
                 self.seat = None
                 replacement = self._claim_available_seat(nearby_npcs)
@@ -736,8 +894,14 @@ class NPC:
                 else:
                     self._start_exit_route()
         elif self.state == self.LEAVING:
-            self._set_state(self.LEFT)
-            self.has_left = True
+            current_tile = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
+            if current_tile in ((9, 24), (10, 24)) or current_tile[1] >= 24:
+                self._set_state(self.LEFT)
+                self.has_left = True
+            else:
+                door_col = 9 if self.x < (MAP_COLS * TILE_SIZE / 2) else 10
+                self._set_route([(door_col, 22), (door_col, 24)])
+
         elif self.state == self.ENTERING_AUDITORIUM:
             # The NPC has crossed the four-door theater entrance; only now
             # does it claim an open seat.  Seats being approached count as
@@ -759,16 +923,23 @@ class NPC:
                 {self.TICKET_LINE, self.BUYING_TICKET})
             target = self._ticket_follow_tile(max(0, len(leaders) - 1))
         elif self.state == self.USHER_LINE:
+            # Let guest safely clear the ticket counter exit before retargeting
+            if int(self.y // TILE_SIZE) >= 17 and len(self._route) > 1:
+                return
+            # Only count waiting USHER_LINE NPCs as leaders for target calculation.
+            # CHECKING_TICKET NPCs are at the desk; they don't occupy a floor slot.
             leaders = self._queue_leaders(
                 nearby_npcs, len(USHER_DESK_COLS),
-                {self.USHER_LINE, self.CHECKING_TICKET})
+                {self.USHER_LINE})
             target = self._usher_wait_tile(len(leaders))
         elif self.state == self.SNACK_LINE:
+            # Only count waiting SNACK_LINE NPCs; BUYING_SNACK are at the counter.
             leaders = self._queue_leaders(
                 nearby_npcs, len(SNACK_DESK_COLS),
-                {self.SNACK_LINE, self.BUYING_SNACK})
+                {self.SNACK_LINE})
             target = self._snack_wait_tile(
                 sum(other.state == self.SNACK_LINE for other in leaders))
+
         else:
             return
 
@@ -776,6 +947,7 @@ class NPC:
             int(self._target_x // TILE_SIZE), int(self._target_y // TILE_SIZE))
         if target != current_goal:
             self._set_route([target])
+
 
     def _claim_available_seat(self, nearby_npcs: list["NPC"] | None) -> tuple[int, int] | None:
         """Claim a real, currently unoccupied auditorium seat.
@@ -867,6 +1039,7 @@ class NPC:
             # ticket lane and bunch moving guests on top of queued customers.
             exit_col = self._ticket_exit_gap()
             self._choose_usher_lane(nearby_npcs)
+            self.usher_seq = _next_queue_seq()
             self._set_state(
                 self.USHER_LINE,
                 [(exit_col, 18), (exit_col, 16), self._usher_wait_tile()],
@@ -877,12 +1050,14 @@ class NPC:
                 # Select a counter from the live concession queues, then take
                 # one direct route to its queue position.
                 self._choose_snack_lane(nearby_npcs)
+                self.snack_seq = _next_queue_seq()
                 self._set_state(self.GOING_TO_SNACK, [self._snack_wait_tile()])
             else:
                 self._start_seat_route()
         elif self.state == self.BUYING_SNACK:
             self.has_food = True
             self._start_seat_route()
+
 
     def _start_seat_route(self):
         # Column 10 is an auditorium doorway.  A single target lets the
@@ -891,19 +1066,23 @@ class NPC:
         self._set_state(self.ENTERING_AUDITORIUM, [(10, 7)])
 
     def _start_exit_route(self, movie_finished: bool = False):
-        """Walk the guest back out while reserving their chair until clear."""
+        """Walk the guest back out through the main exit doors (row 24)."""
         if self.state in {self.LEAVING, self.LEFT}:
             return
-        # Do not release the reservation here. The sprite is still sitting on
-        # the chair and another guest must not claim it until this NPC has
-        # physically crossed into a different tile.
         if movie_finished:
             self._speech_text = "Movie's over!"
         else:
             self._speech_text = "I'm heading out."
-        # The BFS planner handles the centre corridor, checkpoint and lobby
-        # in one pass, producing the shortest legal path to the exterior.
-        self._set_state(self.LEAVING, [(10, 24)])
+
+        door_col = 9 if self.x < (MAP_COLS * TILE_SIZE / 2) else 10
+        cur_row = int(self.y // TILE_SIZE)
+        if cur_row > 14:
+            waypoints = [(door_col, 22), (door_col, 24)]
+        else:
+            waypoints = [(door_col, 15), (door_col, 22), (door_col, 24)]
+
+        self._set_state(self.LEAVING, waypoints)
+
 
     def _is_queue_state(self) -> bool:
         return self.state in {
@@ -923,11 +1102,18 @@ class NPC:
     def _replan_around_npcs(self, nearby_npcs: list["NPC"] | None,
                             allow_queue_recovery: bool = False) -> bool:
         """Rebuild the current travel leg around NPC-occupied tiles."""
-        if (not nearby_npcs or (self._is_queue_state() and not allow_queue_recovery)
-                or self._detour_cooldown > 0):
+        if self._detour_cooldown > 0:
+            return False
+        # Queue states are allowed to replan after a threshold; the queue-
+        # settled branch handles the final snap, so detours remain safe.
+        if self._is_queue_state() and not allow_queue_recovery:
+            return False
+        if not nearby_npcs:
             return False
         start = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
         goal = (int(self._target_x // TILE_SIZE), int(self._target_y // TILE_SIZE))
+        if start == goal:
+            return False
         occupied = {
             (int(other.x // TILE_SIZE), int(other.y // TILE_SIZE))
             for other in nearby_npcs
@@ -936,36 +1122,98 @@ class NPC:
         blocked = self._gate_blocked_tiles() | occupied
 
         # If another guest is standing exactly on our current waypoint, wait
-        # for it to clear.  Choosing a perpendicular tile here made NPCs take
-        # apparent detours unrelated to their destination.
+        # for it to clear a moment (give right-of-way time), but don't wait
+        # forever — the escalation loop below will force-snap eventually.
         if goal in occupied:
             return False
 
         path = _tile_path(start, goal, blocked, self._can_walk)
         if len(path) <= 1:
             return False
-        # Keep the waypoints after the blocked leg.  Replacing the whole
-        # route here caused an NPC to reach one detour target and incorrectly
-        # advance to its next service action.
         remaining_route = list(self._route)
         self._route = path[1:] + remaining_route
         self._advance_route()
-        self._detour_cooldown = 0.35
+        self._detour_cooldown = 0.25
         return True
 
-    def _recover_from_stall(self, nearby_npcs: list["NPC"] | None) -> bool:
-        """Try one safe detour when a guest has not moved for too long.
+    def _hard_unstick(self, nearby_npcs: list["NPC"] | None) -> bool:
+        """Last-resort: snap to an adjacent free tile and fully rebuild the route.
 
-        Queue members keep their existing destination, so recovery cannot let
-        them cut a line. If that destination is occupied, waiting remains the
-        correct behaviour and the route is left unchanged.
+        This handles NPC sub-pixel locks where the NPC is stuck exactly between
+        two tiles and BFS cannot find a path because it considers the NPC's own
+        pixel position unreachable from any safe starting tile.
         """
-        if (self._stalled_for < 0.9 or self._recovery_cooldown > 0
-                or not nearby_npcs):
+        cur_col = int(self.x // TILE_SIZE)
+        cur_row = int(self.y // TILE_SIZE)
+        goal = (int(self._target_x // TILE_SIZE), int(self._target_y // TILE_SIZE))
+        occupied = set()
+        if nearby_npcs:
+            occupied = {
+                (int(other.x // TILE_SIZE), int(other.y // TILE_SIZE))
+                for other in nearby_npcs
+                if other is not self and not other.has_left and other.spawn_delay <= 0
+            }
+        for dcol, drow in ((0, 1), (0, -1), (1, 0), (-1, 0),
+                            (1, 1), (-1, 1), (1, -1), (-1, -1)):
+            nc, nr = cur_col + dcol, cur_row + drow
+            if (nc, nr) in occupied:
+                continue
+            if not self._can_walk(nc, nr):
+                continue
+            # Snap pixel position to centre of that tile
+            self.x = float(nc * TILE_SIZE + TILE_SIZE // 2)
+            self.y = float(nr * TILE_SIZE + TILE_SIZE // 2)
+            self._target_x, self._target_y = self.x, self.y
+            self._route = []
+            # Now rebuild from the fresh position to the goal
+            if goal != (nc, nr):
+                blocked = self._gate_blocked_tiles() | occupied
+                path = _tile_path((nc, nr), goal, blocked, self._can_walk)
+                if len(path) > 1:
+                    self._route = path[1:]
+                    self._advance_route()
+            self._stalled_for = 0.0
+            self._recovery_cooldown = 1.0
+            self._detour_cooldown = 0.4
+            return True
+        return False
+
+    def _recover_from_stall(self, nearby_npcs: list["NPC"] | None) -> bool:
+        """Multi-tier escalation when a guest has not moved.
+
+        Tier 1 (≥0.35s): quick replan around current NPC occupants.
+        Tier 2 (≥1.2s): replan ignoring queue-state restriction.
+        Tier 3 (≥3.0s): hard unstick — snap to neighbour tile, full reroute.
+        Tier 4 (≥6.0s): absolute deadlock — leave the simulation via exit door.
+        """
+        if self._recovery_cooldown > 0:
             return False
-        recovered = self._replan_around_npcs(nearby_npcs, allow_queue_recovery=True)
-        self._recovery_cooldown = 0.9
-        return recovered
+
+        if self._stalled_for >= 6.0 and self.state not in (self.LEAVING, self.LEFT):
+            # Absolute deadlock — route out rather than freeze permanently.
+            self._speech_text = "Excuse me, coming through!"
+            self._start_exit_route()
+            self._stalled_for = 0.0
+            self._recovery_cooldown = 2.0
+            return True
+
+        if self._stalled_for >= 3.0:
+            if self._hard_unstick(nearby_npcs):
+                return True
+            self._recovery_cooldown = 0.5
+            return False
+
+        if self._stalled_for >= 1.2:
+            recovered = self._replan_around_npcs(nearby_npcs, allow_queue_recovery=True)
+            self._recovery_cooldown = 0.6
+            return recovered
+
+        if self._stalled_for >= 0.35:
+            recovered = self._replan_around_npcs(nearby_npcs, allow_queue_recovery=False)
+            self._recovery_cooldown = 0.35
+            return recovered
+
+        return False
 
     def update(self, dt: float, nearby_npcs: list["NPC"] | None = None,
                movie_finished: bool = False):
@@ -979,18 +1227,6 @@ class NPC:
             self._choose_ticket_lane(nearby_npcs)
             self._set_route([self._ticket_wait_tile()])
             self._ticket_lane_locked = True
-        self._occupied_seat_tiles = {
-            other.seat
-            for other in nearby_npcs or []
-            if other is not self and not other.has_left and other.seat is not None
-        }
-        self._occupied_seat_tiles.update(
-            (int(other.x // TILE_SIZE), int(other.y // TILE_SIZE))
-            for other in nearby_npcs or []
-            if other is not self
-            and not other.has_left
-            and tile_at(int(other.x // TILE_SIZE), int(other.y // TILE_SIZE)) == TILE_SEAT
-        )
         if self.state == self.LEAVING and self.seat is not None:
             current_tile = (int(self.x // TILE_SIZE), int(self.y // TILE_SIZE))
             if current_tile != self.seat:
@@ -1010,11 +1246,26 @@ class NPC:
             self._start_exit_route(movie_finished=True)
             return
 
+        if self.state in (self.TICKET_LINE, self.USHER_LINE, self.SNACK_LINE):
+            self._time_waiting += dt
+            if self._time_waiting >= self._wait_patience:
+                self._speech_text = random.choice([
+                    "I can't wait any longer.",
+                    "Line is taking forever...",
+                    "I'll catch a movie another time.",
+                ])
+                self._start_exit_route()
+                return
+
         if self.state == self.SEATED:
             self._watch_time += dt
+            self.direction = _DIR_UP
+            self._frame = 0
             if self._watch_time >= self._boredom_limit:
                 self._start_exit_route()
                 return
+            return
+
 
         if self._service_timer > 0:
             self._service_timer -= dt
@@ -1022,6 +1273,7 @@ class NPC:
             if self._service_timer <= 0:
                 self._finish_service(nearby_npcs)
             return
+
 
         # Re-evaluate line positions before collision movement, not only on
         # arrival. This lets a blocked follower immediately take the newly
@@ -1038,6 +1290,7 @@ class NPC:
                 self._advance_route()
             else:
                 self._frame = 0
+                self._orient_for_queue()
                 self._arrive_at_step(nearby_npcs)
             return
 
@@ -1049,40 +1302,69 @@ class NPC:
         next_x = self.x + (dx / dist) * step
         next_y = self.y + (dy / dist) * step
         blocked_by_npc = False
+        blocked_other: "NPC | None" = None
         if nearby_npcs:
             for other in nearby_npcs:
                 if other is self or other.has_left or other.spawn_delay > 0:
                     continue
+                # Fast AABB rejection before expensive checks
+                if abs(next_x - other.x) > 20 or abs(next_y - other.y) > 20:
+                    continue
                 # The seating room is intentionally a soft-collision zone.
-                # Seat ownership still blocks a chair, but people may pass
-                # through one another in the aisles/doorway so a departing
-                # guest cannot deadlock an arriving guest.
                 if (self._in_auditorium(self.x, self.y)
                         or self._in_auditorium(other.x, other.y)):
                     continue
                 if math.hypot(next_x - other.x, next_y - other.y) < _NPC_COLLISION_RADIUS * 2:
-                    # Right-of-way: the NPC closer to its next waypoint moves
-                    # first; the one behind waits. This prevents two people
-                    # approaching a shared aisle intersection from deadlocking.
-                    self_remaining = math.hypot(self._target_x - self.x,
-                                                self._target_y - self.y)
-                    other_remaining = math.hypot(other._target_x - other.x,
-                                                 other._target_y - other.y)
-                    if self_remaining > other_remaining + 2 or (
-                            abs(self_remaining - other_remaining) <= 2
-                            and self.queue_slot > other.queue_slot):
+                    # Deterministic right-of-way: lower queue_slot = higher priority.
+                    # Exactly one of any colliding pair is always the yielder, so
+                    # head-on deadlocks are impossible by construction.
+                    # Tiebreak by character_id for pairs sharing the same slot.
+                    self_priority = (self.queue_slot, self.character_id)
+                    other_priority = (other.queue_slot, other.character_id)
+                    if self_priority > other_priority:
+                        # I am lower priority — I yield to `other`.
                         blocked_by_npc = True
+                        blocked_other = other
                         self._collision_debug_target = (other.x, other.y)
                         break
+                    # If I am higher priority I pass; other will yield on its turn.
+
         if blocked_by_npc:
-            if self._replan_around_npcs(nearby_npcs):
-                self._stalled_for = 0.0
-                self._frame = 0
-                return
+            # Tier 0 (immediate): queue state very close to slot — settle in place if tile is clear.
+            if self._is_queue_state() and dist < TILE_SIZE * 0.75:
+                target_occupied = any(
+                    other is not self and not other.has_left and other.spawn_delay <= 0
+                    and abs(other.x - self._target_x) < 14 and abs(other.y - self._target_y) < 14
+                    for other in nearby_npcs or []
+                )
+                if not target_occupied:
+                    self.x, self.y = self._target_x, self._target_y
+                    self._stalled_for = 0.0
+                    if not self._route:
+                        self._orient_for_queue()
+                        self._arrive_at_step(nearby_npcs)
+                    self._frame = 0
+                    if self._is_queue_state():
+                        self._orient_for_queue()
+                    return
+
+            # Tier 0 (immediate): if goal tile is free, try instant replan right now.
+            if self._detour_cooldown <= 0 and blocked_other is not None:
+                goal = (int(self._target_x // TILE_SIZE), int(self._target_y // TILE_SIZE))
+                other_tile = (int(blocked_other.x // TILE_SIZE),
+                              int(blocked_other.y // TILE_SIZE))
+                if goal != other_tile:
+                    if self._replan_around_npcs(nearby_npcs):
+                        self._stalled_for = 0.0
+                        self._frame = 0
+                        return
+
             self._stalled_for += dt
             if self._recover_from_stall(nearby_npcs):
                 self._stalled_for = 0.0
             self._frame = 0
+            if self._is_queue_state():
+                self._orient_for_queue()
             return
 
         if self._can_walk(int(next_x // TILE_SIZE), int(next_y // TILE_SIZE)):
@@ -1090,27 +1372,44 @@ class NPC:
             self._stalled_for = 0.0
             self._frame = int(self._anim_t / 0.2) % _ANIM_FRAMES
         else:
-            # Rebuild after a layout change instead of pressing into a wall.
+            # Pressed into a wall — accumulate stall and use escalation recovery.
             self._stalled_for += dt
             self._recover_from_stall(nearby_npcs)
             self._frame = 0
+
+
 
     def draw(self, surface: pygame.Surface, camera):
         if self.spawn_delay > 0:
             return
         sx, sy = camera.world_to_screen(self.x, self.y)
 
+        # Frustum culling: skip rendering if off camera viewport
+        sw, sh = _NPC_DRAW_W, _NPC_DRAW_H
+        if sx < -sw or sx > surface.get_width() + sw or sy < -sh or sy > surface.get_height() + sh:
+            return
+
         # Get sprite frame
-        sprite = _get_npc_frame(self.character_id, self.direction, self._frame)
+        dir_to_use = _DIR_UP if self.state == self.SEATED else self.direction
+        frame_to_use = 0 if self.state == self.SEATED else self._frame
+        sprite = _get_npc_frame(self.character_id, dir_to_use, frame_to_use)
         sw, sh = sprite.get_size()
 
-        # Draw shadow
-        shadow = pygame.Surface((sw - 8, 6), pygame.SRCALPHA)
-        pygame.draw.ellipse(shadow, (0, 0, 0, 40), shadow.get_rect())
-        surface.blit(shadow, (int(sx) - sw // 2 + 4, int(sy) - 2))
+        # Draw cached shadow (hidden when seated on chair)
+        if self.state != self.SEATED:
+            surface.blit(_get_shadow_surf(), (int(sx) - sw // 2 + 4, int(sy) - 2))
 
         # Draw sprite
-        surface.blit(sprite, (int(sx) - sw // 2, int(sy) - sh + 4))
+        if self.state == self.SEATED:
+            # Only show head peeking over the top of the cinema seat (back/body hidden behind chair)
+            head_h = 22
+            head_surf = sprite.subsurface(pygame.Rect(0, 0, sw, head_h))
+            surface.blit(head_surf, (int(sx) - sw // 2, int(sy) - 34))
+        else:
+            surface.blit(sprite, (int(sx) - sw // 2, int(sy) - sh + 4))
+
+
+
 
         if DEBUG_NPC_COLLISION_RANGE:
             # Each ring is this NPC's own radius.  Collision starts exactly

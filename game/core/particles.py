@@ -103,13 +103,22 @@ class ParticleSystem:
         self.floating_texts = [ft for ft in self.floating_texts if ft.alive]
 
     def draw(self, surface, camera):
+        w = surface.get_width()
+        h = surface.get_height()
         for p in self.particles:
-            a = max(0, int(255 * p.life / p.max_life))
             sx, sy = camera.world_to_screen(p.x, p.y)
-            color = (*p.color[:3], a)
-            s = pygame.Surface((p.size*2, p.size*2), pygame.SRCALPHA)
-            pygame.draw.circle(s, color, (p.size, p.size), p.size)
-            surface.blit(s, (int(sx)-p.size, int(sy)-p.size))
+            # Frustum culling
+            if sx < -10 or sx > w + 10 or sy < -10 or sy > h + 10:
+                continue
+            if p.size <= 2:
+                # Fast direct draw for tiny sparkles/dust
+                pygame.draw.circle(surface, p.color, (int(sx), int(sy)), p.size)
+            else:
+                a = max(0, min(255, int(255 * p.life / p.max_life)))
+                s = pygame.Surface((p.size * 2, p.size * 2), pygame.SRCALPHA)
+                pygame.draw.circle(s, (*p.color[:3], a), (p.size, p.size), p.size)
+                surface.blit(s, (int(sx) - p.size, int(sy) - p.size))
 
         for ft in self.floating_texts:
             ft.draw(surface, camera)
+
