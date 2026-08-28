@@ -1,7 +1,3 @@
-"""
-CinePlex Dreams — UI Widgets
-Reusable Button, Slider, and StaffControl widgets.
-"""
 import pygame
 import math
 from game.settings import (

@@ -1,7 +1,3 @@
-"""
-UI Package
-Reusable widgets (Button, Slider), live HUD dashboard, dialog menus, simulation panels, and speech bubbles.
-"""
 
 from game.ui.button import Button, Slider, draw_panel, draw_text
 from game.ui.hud import HUD

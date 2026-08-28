@@ -1,9 +1,3 @@
-"""
-CinePlex Dreams — Asset Loader
-
-Loads PNGs from game/assets/ if they exist.
-Falls back to programmatically generated placeholder surfaces.
-"""
 
 import os
 import pygame
@@ -41,8 +35,6 @@ def _make(w, h):
     return pygame.Surface((w, h), pygame.SRCALPHA)
 
 
-# ── Tile generators & image loader ───────────────────────────────────────
-
 _tileset_sheet_surf: pygame.Surface | None = None
 
 def get_tileset_sheet() -> pygame.Surface | None:
@@ -57,21 +49,17 @@ def get_tileset_sheet() -> pygame.Surface | None:
     return None
 
 
-# Hand-tuned bounding boxes for each sprite in tileset.jpg (1024×1024)
-# Row 0 (top): floor, carpet, wall, counter/desk, ornate door
-# Row 1 (bottom): cinema seat, CINEMA neon sign, queue ropes, snack stand, screen TV
 _TILESET_RECTS = {
-    # (col, row): (x, y, w, h) in the 1024×1024 image
-    (0, 0): (  0, 307, 204, 205),   # checkered floor
-    (1, 0): (204, 307, 205, 205),   # plush carpet
-    (2, 0): (409, 307, 204, 205),   # brick wall
-    (3, 0): (600, 307, 225, 205),   # counter + register
-    (4, 0): (830, 307, 190, 205),   # ornate door
-    (0, 1): (  0, 527, 170, 195),   # red cinema seat
-    (1, 1): (170, 527, 220, 175),   # CINEMA neon sign
-    (2, 1): (390, 527, 175, 195),   # queue ropes
-    (3, 1): (560, 527, 260, 195),   # snack stand + items
-    (4, 1): (830, 527, 190, 195),   # screen TV
+    (0, 0): (  0, 307, 204, 205),
+    (1, 0): (204, 307, 205, 205),
+    (2, 0): (409, 307, 204, 205),
+    (3, 0): (600, 307, 225, 205),
+    (4, 0): (830, 307, 190, 205),
+    (0, 1): (  0, 527, 170, 195),
+    (1, 1): (170, 527, 220, 175),
+    (2, 1): (390, 527, 175, 195),
+    (3, 1): (560, 527, 260, 195),
+    (4, 1): (830, 527, 190, 195),
 }
 
 
@@ -109,8 +97,6 @@ def _slice_tileset_tile(col: int, row: int, key_out_bg: bool = False,
 
 
 def _load_tile_img(filename: str) -> pygame.Surface | None:
-    """Loads a tile image from assets/tiles/ if it exists, scaling its width to TILE_SIZE
-    while maintaining aspect ratio, so tall objects aren't squished."""
     for ext in (".png", ".jpg", ".jpeg"):
         path = os.path.join(TILES_DIR, filename + ext)
         if os.path.exists(path):
@@ -123,7 +109,6 @@ def _load_tile_img(filename: str) -> pygame.Surface | None:
 
 
 def _load_custom_tileset():
-    """Load the custom 'new tileset.png' spritesheet once."""
     c = _get("_custom_tileset")
     if c: return c
     path = os.path.join(TILES_DIR, "new tileset.png")
@@ -134,7 +119,6 @@ def _load_custom_tileset():
 
 
 def _slice_custom(x: int, y: int, w: int, h: int, target_w=TILE_SIZE, target_h=TILE_SIZE) -> pygame.Surface | None:
-    """Slice a rectangle from the custom tileset and scale to target size."""
     sheet = _load_custom_tileset()
     if sheet is None:
         return None
@@ -193,7 +177,6 @@ def tile_wall():
 def tile_desk():
     c = _get("t_desk")
     if c: return c
-    # Try: individual file > counter.png > custom tileset ticket booth > old tileset > procedural
     img = (_load_tile_img("ticket_booth") or _load_tile_img("counter")
            or _load_tile_img("desk") or _slice_tileset_tile(3, 0, key_out_bg=True, base_surf=tile_floor()))
     if img: return _put("t_desk", img)
@@ -208,19 +191,16 @@ def tile_seat():
     c = _get("t_seat")
     if c: return c
 
-    # 1. Load the single seat sprite directly from assets/tiles/seat.png
     img = _load_tile_img("seat")
     if img:
         return _put("t_seat", img)
 
-    # 2. Fallback: slice from tileset.jpg (row 1, col 0 = single red seat)
     img = _slice_tileset_tile(0, 1, key_out_bg=True, base_surf=tile_carpet())
     if img:
         return _put("t_seat", img)
 
-    # 3. Rich procedural seat with 3D depth
     s = tile_carpet().copy()
-    seat_c = (140, 25, 35)  # Deep cinema red
+    seat_c = (140, 25, 35)
     pygame.draw.rect(s, (80, 60, 40), (4, 8, 5, 32))
     pygame.draw.rect(s, (80, 60, 40), (TILE_SIZE-9, 8, 5, 32))
     pygame.draw.rect(s, _darken(seat_c, 40), (9, 4, TILE_SIZE-18, 18), border_radius=3)
@@ -272,7 +252,6 @@ def tile_queue() -> pygame.Surface:
 def tile_snack() -> pygame.Surface:
     c = _get("t_snack")
     if c: return c
-    # Try: popcorn.png > drinks.png > snack.png > old tileset > procedural
     img = (_load_tile_img("popcorn") or _load_tile_img("drinks")
            or _load_tile_img("snack") or _slice_tileset_tile(3, 1, key_out_bg=True, base_surf=tile_floor()))
     if img: return _put("t_snack", img)
@@ -287,24 +266,18 @@ def tile_snack() -> pygame.Surface:
 def tile_screen() -> pygame.Surface:
     c = _get("t_screen")
     if c: return c
-    # Try: individual file > tileset.jpg TV screen > procedural
     img = _load_tile_img("screen") or _slice_tileset_tile(4, 1)
     if img: return _put("t_screen", img)
-    # Rich procedural cinema screen
     s = _make(TILE_SIZE, TILE_SIZE)
     s.fill((5, 5, 15))
-    # Frame (brushed metal look)
     frame_c = (40, 35, 55)
     pygame.draw.rect(s, frame_c, (0, 0, TILE_SIZE, TILE_SIZE), border_radius=2)
-    # Inner screen (dark blue with subtle gradient)
     pygame.draw.rect(s, (8, 15, 40), (3, 3, TILE_SIZE-6, TILE_SIZE-6), border_radius=1)
-    # Screen reflection highlights
     glow = _make(TILE_SIZE-8, TILE_SIZE-8)
     for y in range(glow.get_height()):
         a = int(15 * (1 - y / glow.get_height()))
         pygame.draw.line(glow, (100, 180, 255, a), (0, y), (glow.get_width(), y))
     s.blit(glow, (4, 4))
-    # Bottom bezel
     pygame.draw.rect(s, _lighten(frame_c, 15), (2, TILE_SIZE-5, TILE_SIZE-4, 3))
     return _put("t_screen", s)
 
@@ -314,7 +287,6 @@ def tile_usher() -> pygame.Surface:
     if c: return c
     img = _load_tile_img("usher")
     if img: return _put("t_usher", img)
-    # Procedural fallback
     surf = pygame.Surface((TILE_SIZE, TILE_SIZE))
     surf.fill(C_FLOOR)
     pygame.draw.rect(surf, (150, 50, 50), (4, 4, 40, 40), border_radius=4)
@@ -326,42 +298,85 @@ def tile_security() -> pygame.Surface:
     c = _get("t_security")
     if c: return c
     surf = tile_floor().copy()
-    # Metal detector frame
     pygame.draw.rect(surf, (60, 65, 75), (2, 6, TILE_SIZE-4, 34), border_radius=4)
     pygame.draw.rect(surf, (80, 85, 95), (6, 10, TILE_SIZE-12, 26), border_radius=3)
-    # Scanner screen
     pygame.draw.rect(surf, (20, 40, 30), (14, 14, 20, 16), border_radius=2)
-    # LED indicators
     pygame.draw.circle(surf, (50, 200, 80), (12, 18), 2)
     pygame.draw.circle(surf, (200, 50, 50), (12, 24), 2)
     return _put("t_security", surf)
 
 
-def tile_poster() -> pygame.Surface:
-    c = _get("t_poster")
+_POSTER_SLICES = [
+    pygame.Rect(8, 11, 58, 74),
+    pygame.Rect(72, 11, 55, 71),
+    pygame.Rect(135, 11, 55, 73),
+    pygame.Rect(206, 18, 42, 65),
+]
+
+
+def _load_poster_sprite(variant: int = 0) -> pygame.Surface | None:
+    key = f"poster_sprite_{variant % len(_POSTER_SLICES)}"
+    c = _get(key)
+    if c is not None:
+        return c
+    path = os.path.join(TILES_DIR, "movie_posters.png")
+    if os.path.exists(path):
+        try:
+            sheet = pygame.image.load(path).convert_alpha()
+            rect = _POSTER_SLICES[variant % len(_POSTER_SLICES)]
+            sub = sheet.subsurface(rect).copy()
+            target_h = 44
+            target_w = int(target_h * (sub.get_width() / sub.get_height()))
+            scaled = pygame.transform.smoothscale(sub, (target_w, target_h))
+            return _put(key, scaled)
+        except Exception:
+            pass
+    return _put(key, None)
+
+
+def tile_poster(variant: int = 0) -> pygame.Surface:
+    key = f"t_poster_{variant}"
+    c = _get(key)
     if c: return c
+    sprite = _load_poster_sprite(variant)
     surf = tile_corridor().copy()
-    # Ornate frame
+    if sprite:
+        sx = (TILE_SIZE - sprite.get_width()) // 2
+        sy = (TILE_SIZE - sprite.get_height()) // 2
+        surf.blit(sprite, (sx, sy))
+        return _put(key, surf)
+
     frame_c = (180, 150, 80)
     pygame.draw.rect(surf, frame_c, (6, 2, 36, 44), border_radius=2)
     pygame.draw.rect(surf, _darken(frame_c, 30), (6, 2, 36, 44), 2, border_radius=2)
-    # Poster interior
     pygame.draw.rect(surf, (30, 20, 50), (10, 6, 28, 36))
-    # Abstract movie art (stylized star)
     pygame.draw.circle(surf, (200, 60, 80), (24, 18), 8)
     pygame.draw.circle(surf, (240, 180, 60), (24, 18), 4)
-    # Title lines
     pygame.draw.line(surf, (200, 200, 200), (14, 32), (34, 32), 2)
     pygame.draw.line(surf, (160, 160, 160), (16, 36), (32, 36), 1)
-    return _put("t_poster", surf)
+    return _put(key, surf)
+
+
+def tile_poster_for(col: int, row: int) -> pygame.Surface:
+    variant = (col * 3 + row * 7) % len(_POSTER_SLICES)
+    key = f"t_poster_pos_{col}_{row}"
+    c = _get(key)
+    if c: return c
+    sprite = _load_poster_sprite(variant)
+    base = tile_floor().copy() if row >= 18 else tile_corridor().copy()
+    if sprite:
+        sx = (TILE_SIZE - sprite.get_width()) // 2
+        sy = (TILE_SIZE - sprite.get_height()) // 2
+        base.blit(sprite, (sx, sy))
+        return _put(key, base)
+    return tile_poster(variant)
+
 
 
 def tile_plant() -> pygame.Surface:
     surf = pygame.Surface((TILE_SIZE, TILE_SIZE))
     surf.fill(C_FLOOR)
-    # pot
     pygame.draw.rect(surf, (100, 70, 50), (14, 24, 20, 24))
-    # leaves
     pygame.draw.circle(surf, C_PLANT, (16, 16), 12)
     pygame.draw.circle(surf, C_PLANT, (32, 16), 12)
     pygame.draw.circle(surf, (40, 100, 50), (24, 8), 14)
@@ -381,18 +396,15 @@ def tile_corridor() -> pygame.Surface:
     if c: return c
     surf = pygame.Surface((TILE_SIZE, TILE_SIZE))
     surf.fill(C_CORRIDOR)
-    # Dark patterned carpet look for cinema corridor
     for y in range(0, TILE_SIZE, 8):
         for x in range(0, TILE_SIZE, 8):
             if (x + y) % 16 == 0:
                 pygame.draw.rect(surf, _lighten(C_CORRIDOR, 8), (x, y, 8, 8))
-    # Subtle running lights along edges
     pygame.draw.line(surf, (60, 40, 80), (0, 0), (0, TILE_SIZE))
     pygame.draw.line(surf, (60, 40, 80), (TILE_SIZE-1, 0), (TILE_SIZE-1, TILE_SIZE))
     return _put("t_corridor", surf)
 
 
-# Tile lookup by ID
 TILE_FUNCS = {
     1: tile_wall,
     2: tile_floor,
@@ -413,70 +425,55 @@ TILE_FUNCS = {
 }
 
 
-# ── Character sprite generators ──────────────────────────────────────────
-
 def _gen_char(body_color, head_color=(235, 200, 170), frame=0, direction=0,
               accessory=None, hat_color=None):
-    """Generate a small character sprite at native resolution, then scale."""
     w, h = 16, 24
     s = _make(w, h)
     bob = -1 if frame in (1, 3) else 0
     leg_off = [-1, 0, 1, 0][frame % 4]
 
-    # shadow
     pygame.draw.ellipse(s, (0, 0, 0, 50), (3, 20, 10, 4))
-    # legs
     pygame.draw.rect(s, _darken(body_color, 50), (5 - leg_off, 17 + bob, 3, 4))
     pygame.draw.rect(s, _darken(body_color, 50), (8 + leg_off, 17 + bob, 3, 4))
-    # shoes
     pygame.draw.rect(s, (50, 40, 35), (5 - leg_off, 20 + bob, 3, 2))
     pygame.draw.rect(s, (50, 40, 35), (8 + leg_off, 20 + bob, 3, 2))
-    # body
     pygame.draw.rect(s, body_color, (4, 11 + bob, 8, 7))
     pygame.draw.line(s, _darken(body_color, 25), (8, 12 + bob), (8, 17 + bob))
-    # accessory overlay
     if accessory:
         pygame.draw.rect(s, accessory, (5, 13 + bob, 6, 4))
-    # arms
     pygame.draw.rect(s, body_color, (2, 12 + bob, 2, 5))
     pygame.draw.rect(s, body_color, (12, 12 + bob, 2, 5))
     pygame.draw.rect(s, head_color, (2, 16 + bob, 2, 2))
     pygame.draw.rect(s, head_color, (12, 16 + bob, 2, 2))
-    # head
     pygame.draw.rect(s, head_color, (4, 3 + bob, 8, 8))
-    # hair
     hair = _darken(head_color, 80)
     pygame.draw.rect(s, hair, (4, 2 + bob, 8, 2))
-    if direction == 0:  # down
+    if direction == 0:
         pygame.draw.rect(s, hair, (4, 3 + bob, 1, 3))
         pygame.draw.rect(s, hair, (11, 3 + bob, 1, 3))
-        # eyes
         pygame.draw.rect(s, (40, 30, 30), (5, 6 + bob, 2, 2))
         pygame.draw.rect(s, (40, 30, 30), (9, 6 + bob, 2, 2))
         s.set_at((5, 6 + bob), (255, 255, 255))
         s.set_at((9, 6 + bob), (255, 255, 255))
         pygame.draw.line(s, (180, 100, 100), (6, 9 + bob), (9, 9 + bob))
-    elif direction == 3:  # up
+    elif direction == 3:
         pygame.draw.rect(s, hair, (4, 3 + bob, 8, 4))
-    elif direction == 1:  # left
+    elif direction == 1:
         pygame.draw.rect(s, (40, 30, 30), (4, 6 + bob, 2, 2))
         s.set_at((4, 6 + bob), (255, 255, 255))
-    elif direction == 2:  # right
+    elif direction == 2:
         pygame.draw.rect(s, (40, 30, 30), (10, 6 + bob, 2, 2))
         s.set_at((11, 6 + bob), (255, 255, 255))
-    # hat
     if hat_color:
         pygame.draw.rect(s, hat_color, (3, 1 + bob, 10, 3))
         pygame.draw.rect(s, _darken(hat_color, 20), (2, 3 + bob, 12, 1))
 
-    # scale to game size
     return pygame.transform.scale(s, (PLAYER_SPRITE_W * 2, PLAYER_SPRITE_H * 2))
 
 
 def get_player_sheet():
     c = _get("player_sheet")
     if c is not None: return c
-    # Check for jush player.png or player.png
     for fname in ("jush player.png", "jush player.jpg", "player.png", "player.jpg"):
         path = os.path.join(SPRITES_DIR, fname)
         if os.path.exists(path):
@@ -494,18 +491,16 @@ def player_sprite(frame=0, direction=0):
         fw = sheet.get_width() // 4
         fh = sheet.get_height() // 4
 
-        # Directions: 0=Down, 1=Left, 2=Right, 3=Up
-        # In jush player sprite sheet: Row 0=Down, Row 1=Left, Row 3=Up
-        if direction == 0:     # Down
+        if direction == 0:
             row = 0
             flip_x = False
-        elif direction == 1:   # Left (Row 1 naturally faces left)
+        elif direction == 1:
             row = 1
             flip_x = False
-        elif direction == 2:   # Right (flip Row 1 to face right)
+        elif direction == 2:
             row = 1
             flip_x = True
-        elif direction == 3:   # Up
+        elif direction == 3:
             row = 3
             flip_x = False
         else:
@@ -517,7 +512,6 @@ def player_sprite(frame=0, direction=0):
         if flip_x:
             s = pygame.transform.flip(s, True, False)
 
-        # Scale cleanly to player size (approx 52px high, 48px wide)
         target_w = 48
         target_h = int(target_w * (fh / fw))
         s = pygame.transform.smoothscale(s, (target_w, target_h))
@@ -536,8 +530,6 @@ def npc_sprite(color_idx=0, frame=0, direction=0):
 
 
 _STAFF_CHARACTER_SPECS = {
-    # sheet filename, character index. All supplied animation sheets share
-    # the same 18×26, 3-frame, 4-direction layout.
     "cashier": ("Townspeople_Animations.png", 0),
     "usher":   ("MinersConstruction_Animations.png", 3),
     "server":  ("ForestNpcs_Animations.png", 1),
@@ -545,7 +537,6 @@ _STAFF_CHARACTER_SPECS = {
 
 
 def _staff_character_sprite(role, frame=0, direction=0):
-    """Use the real animation-sheet character assigned to a staff role."""
     key = f"staff_character_{role}_{frame % 3}_{direction}"
     cached = _get(key)
     if cached is not None:
@@ -593,13 +584,10 @@ def server_sprite(frame=0, direction=0):
                                           frame=frame, direction=direction))
 
 
-# ── Bubble / UI generators ───────────────────────────────────────────────
-
 def _gen_bubble(icon_fn, bg=(255, 255, 255, 220)):
     s = _make(28, 32)
     pygame.draw.rect(s, bg, (1, 1, 26, 24), border_radius=5)
     pygame.draw.rect(s, (120, 120, 120), (1, 1, 26, 24), 1, border_radius=5)
-    # tail
     pygame.draw.polygon(s, bg, [(12, 25), (16, 25), (14, 31)])
     if icon_fn:
         icon_fn(s)
@@ -647,13 +635,10 @@ def bubble_star():
     return _put("bub_star", _gen_bubble(icon))
 
 
-# ── Bubble / UI generators ───────────────────────────────────────────────
-
 def _gen_bubble(icon_fn, bg=(255, 255, 255, 220)):
     s = _make(28, 32)
     pygame.draw.rect(s, bg, (1, 1, 26, 24), border_radius=5)
     pygame.draw.rect(s, (120, 120, 120), (1, 1, 26, 24), 1, border_radius=5)
-    # tail
     pygame.draw.polygon(s, bg, [(12, 25), (16, 25), (14, 31)])
     if icon_fn:
         icon_fn(s)
@@ -705,7 +690,6 @@ def bubble_food():
     c = _get("bub_food")
     if c: return c
     def icon(s):
-        # question mark
         pygame.draw.arc(s, (200, 160, 60), (9, 5, 10, 10), 0, 4.0, 2)
         pygame.draw.rect(s, (200, 160, 60), (13, 14, 2, 3))
         pygame.draw.rect(s, (200, 160, 60), (13, 19, 2, 2))
@@ -713,7 +697,6 @@ def bubble_food():
 
 
 def bubble_speech(text, font):
-    """Generate a speech bubble with custom text. Not cached."""
     rendered = font.render(text, True, (50, 40, 60))
     tw, th = rendered.get_size()
     pad = 8
@@ -727,10 +710,7 @@ def bubble_speech(text, font):
     return s
 
 
-# ── Background ────────────────────────────────────────────────────────────
-
 def menu_background_frames():
-    """Load and cache all animation frames for the main menu background GIF."""
     c = _get("menu_bg_frames")
     if c:
         return c
@@ -759,7 +739,6 @@ def menu_background_frames():
 
 
 def menu_background(anim_t: float = 0.0):
-    """Return the active animation frame for the menu background at time anim_t."""
     frames = menu_background_frames()
     if len(frames) == 1:
         return frames[0][0]
@@ -775,5 +754,29 @@ def menu_background(anim_t: float = 0.0):
     return frames[-1][0]
 
 
+def menu_title_logo() -> pygame.Surface | None:
+    c = _get("menu_title_logo")
+    if c is not None:
+        return c
+    for fname in ("text.png", "text.jpg", "logo.png", "title.png"):
+        path = os.path.join(UI_DIR, fname)
+        if os.path.exists(path):
+            try:
+                img = pygame.image.load(path).convert_alpha()
+                bbox = img.get_bounding_rect()
+                if bbox.width > 0 and bbox.height > 0:
+                    cropped = img.subsurface(bbox).copy()
+                else:
+                    cropped = img
+                target_w = 460
+                target_h = int(target_w * (cropped.get_height() / cropped.get_width()))
+                scaled = pygame.transform.smoothscale(cropped, (target_w, target_h))
+                return _put("menu_title_logo", scaled)
+            except Exception:
+                pass
+    return _put("menu_title_logo", None)
+
+
 def clear_cache():
     _cache.clear()
+

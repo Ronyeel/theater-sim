@@ -1,9 +1,8 @@
-"""In-game controls for changing and restarting a theater simulation."""
 import pygame
 
 from game.settings import (
     SCREEN_W, SCREEN_H, SCENARIOS,
-    C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN, C_TEXT_WHITE, C_TEXT_DIM,
+    C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN, C_NEON_GREEN, C_TEXT_WHITE, C_TEXT_DIM,
 )
 from game.ui.button import Button, draw_panel, draw_text
 
@@ -16,7 +15,6 @@ def _font(name, size, bold=False):
 
 
 class SimulationPanel:
-    """A modal, preset-first editor styled like the movie selection dialog."""
 
     def __init__(self, bridge, on_apply):
         self.bridge = bridge
@@ -49,16 +47,18 @@ class SimulationPanel:
                                 round(bridge.food_prob * 100), C_NEON_CYAN)
         self.fields = [self.cashiers, self.ushers, self.servers, self.arrivals, self.runtime, self.food]
 
-        self._speed = bridge.speed
-        self.speed_buttons: list[tuple[int, Button]] = []
-        for index, speed in enumerate((1, 2, 5, 10)):
-            button = Button(pygame.Rect(x + index * 68, self.panel.bottom - 78, 58, 28),
-                            f"{speed}×", C_NEON_CYAN, 12)
-            button.on_click(lambda value=speed: self._set_speed(value))
-            self.speed_buttons.append((speed, button))
-        self.apply_button = Button(pygame.Rect(self.panel.right - 228, self.panel.bottom - 82, 200, 38),
-                                   "APPLY & RESTART", C_NEON_GOLD, 14)
-        self.apply_button.on_click(self.apply)
+        btn_y = self.panel.bottom - 65
+        self.apply_button = Button(
+            pygame.Rect(self.panel.x + 32, btn_y, 260, 42),
+            "APPLY CHANGES (LIVE)", C_NEON_GREEN, 13
+        )
+        self.apply_button.on_click(lambda: self.apply(reset=False))
+
+        self.reset_button = Button(
+            pygame.Rect(self.panel.x + 310, btn_y, 260, 42),
+            "RESET SIMULATION", (180, 160, 205), 13
+        )
+        self.reset_button.on_click(lambda: self.apply(reset=True))
 
     def open(self):
         self.visible = True
@@ -75,10 +75,6 @@ class SimulationPanel:
         self.arrivals.value = round(b.arrival_interval * 100)
         self.runtime.value = b.runtime
         self.food.value = round(b.food_prob * 100)
-        self._speed = b.speed
-
-    def _set_speed(self, speed):
-        self._speed = speed
 
     def _select_scenario(self, key):
         config = SCENARIOS[key]
@@ -87,7 +83,7 @@ class SimulationPanel:
         self.food.value = round(config["food_prob"] * 100)
         self.runtime.value = config["runtime"]
 
-    def apply(self):
+    def apply(self, reset: bool = False):
         config = {
             "num_cashiers": self.cashiers.value,
             "num_ushers": self.ushers.value,
@@ -95,7 +91,8 @@ class SimulationPanel:
             "arrival_interval": self.arrivals.value / 100.0,
             "food_prob": self.food.value / 100.0,
             "runtime": self.runtime.value,
-            "speed": self._speed,
+            "speed": self.bridge.speed,
+            "reset": reset,
         }
         self._on_apply(config)
         self.close()
@@ -113,17 +110,16 @@ class SimulationPanel:
                     return True
         for field in self.fields:
             field.handle_event(event)
-        for _, button in self.speed_buttons:
-            button.handle_event(event)
         self.apply_button.handle_event(event)
+        self.reset_button.handle_event(event)
         return True
+
 
     def update(self, dt):
         if not self.visible:
             return
-        for _, button in self.speed_buttons:
-            button.update(dt)
         self.apply_button.update(dt)
+        self.reset_button.update(dt)
 
     def draw(self, surface):
         if not self.visible:
@@ -132,9 +128,9 @@ class SimulationPanel:
         shade.fill((5, 3, 15, 185))
         surface.blit(shade, (0, 0))
         draw_panel(surface, self.panel, C_NEON_GOLD, alpha=240, radius=12)
-        draw_text(surface, "Simulation Situation", self._title_font, C_NEON_GOLD,
+        draw_text(surface, "Simulation Parameters & Staffing", self._title_font, C_NEON_GOLD,
                   (self.panel.x + 20, self.panel.y + 17))
-        draw_text(surface, "Choose a preset, fine-tune it, then restart the run.", self._small_font,
+        draw_text(surface, "Select a preset or fine-tune staff in real-time.", self._small_font,
                   C_TEXT_DIM, (self.panel.x + 22, self.panel.y + 46))
 
         for key, rect in self._scenario_rects:
@@ -154,55 +150,72 @@ class SimulationPanel:
                          (self.panel.right - 28, self.panel.y + 260), 1)
         for field in self.fields:
             field.draw(surface)
-        draw_text(surface, "Simulation speed", self._small_font, C_TEXT_DIM,
-                  (self.panel.x + 28, self.panel.bottom - 105))
-        for speed, button in self.speed_buttons:
-            if speed == self._speed:
-                pygame.draw.rect(surface, C_NEON_CYAN, button.rect, 2, border_radius=6)
-            button.draw(surface)
         self.apply_button.draw(surface)
+        self.reset_button.draw(surface)
         draw_text(surface, "[F1] Close", self._small_font, C_TEXT_DIM,
                   (self.panel.right - 120, self.panel.y + 20))
 
 
 class NumberInput:
-    """A compact integer field with explicit limits and keyboard editing."""
 
     def __init__(self, rect, label, min_value, max_value, value, color):
         self.rect = rect
         self.label = label
-        self.min_value = min_value
-        self.max_value = max_value
+        self.min_value = int(min_value)
+        self.max_value = int(max_value)
         self.color = color
         self._font = _font("consolas", 16, bold=True)
         self._label_font = _font("consolas", 13)
-        self._text = str(value)
+        self._text = str(int(float(value)))
         self.focused = False
+        self._select_all = False
 
     @property
     def value(self):
         try:
-            return max(self.min_value, min(self.max_value, int(self._text)))
-        except ValueError:
+            val = int(float(self._text))
+            return max(self.min_value, min(self.max_value, val))
+        except (ValueError, TypeError):
             return self.min_value
 
     @value.setter
-    def value(self, value):
-        self._text = str(max(self.min_value, min(self.max_value, int(value))))
+    def value(self, val):
+        self._text = str(int(max(self.min_value, min(self.max_value, float(val)))))
 
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            self.focused = self.rect.collidepoint(event.pos)
+            clicked = self.rect.collidepoint(event.pos)
+            if clicked and not self.focused:
+                self._select_all = True
+            elif not clicked and self.focused:
+                self._text = str(self.value)
+                self._select_all = False
+            self.focused = clicked
             return self.focused
+
         if not self.focused or event.type != pygame.KEYDOWN:
             return False
+
         if event.key == pygame.K_BACKSPACE:
-            self._text = self._text[:-1]
-        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            self.value = self.value
+            if self._select_all:
+                self._text = ""
+                self._select_all = False
+            else:
+                self._text = self._text[:-1]
+        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_ESCAPE):
+            self._text = str(self.value)
             self.focused = False
-        elif event.unicode.isdigit() and len(self._text) < 4:
-            self._text += event.unicode
+            self._select_all = False
+        elif event.unicode.isdigit():
+            if self._select_all or self._text == "0":
+                self._text = event.unicode
+                self._select_all = False
+            elif len(self._text) < 4:
+                self._text += event.unicode
+
+            if len(self._text) > 1 and self._text.startswith("0"):
+                self._text = str(int(self._text))
+
         return True
 
     def draw(self, surface):
@@ -210,9 +223,16 @@ class NumberInput:
         pygame.draw.rect(surface, (38, 27, 64), self.rect, border_radius=6)
         pygame.draw.rect(surface, self.color if self.focused else (92, 70, 128), self.rect,
                          2 if self.focused else 1, border_radius=6)
+
         displayed = self._text if self._text else "0"
         text = self._font.render(displayed, True, self.color)
         surface.blit(text, (self.rect.x + 12, self.rect.centery - text.get_height() // 2))
+
+        if self.focused and not self._select_all and (pygame.time.get_ticks() // 500) % 2 == 0:
+            cx = self.rect.x + 14 + text.get_width()
+            pygame.draw.line(surface, self.color, (cx, self.rect.centery - 8), (cx, self.rect.centery + 8), 2)
+
         limit = self._label_font.render(f"{self.min_value}–{self.max_value}", True, C_TEXT_DIM)
         surface.blit(limit, (self.rect.right - limit.get_width() - 10,
                              self.rect.centery - limit.get_height() // 2))
+

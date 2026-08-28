@@ -1,7 +1,3 @@
-"""
-CinePlex Dreams — Staff Entities
-Fixed-position cashiers, ushers, and servers with idle/serving animations.
-"""
 import pygame
 import math
 from game.settings import TILE_SIZE, C_NEON_GOLD, C_NEON_PINK, C_NEON_CYAN
@@ -58,7 +54,6 @@ class StaffMember:
         lean = -4 if self._is_serving else 0
         surface.blit(sprite, (int(sx)-sw//2, int(sy)-sh+lean))
 
-        # Label
         label, color = self.LABELS[self.role]
         ls = self._font.render(label, True, color)
         surface.blit(ls, (int(sx) - ls.get_width()//2, int(sy)-sh-ls.get_height()-2))
@@ -67,13 +62,10 @@ class StaffMember:
 def build_staff(num_cashiers: int, num_ushers: int, num_servers: int) -> list[StaffMember]:
     from game.settings import CASHIER_DESK_COLS, CASHIER_DESK_ROW, USHER_DESK_COLS, USHER_DESK_ROW, SNACK_DESK_COLS, SNACK_DESK_ROW
     staff = []
-    # Cashiers
     for i in range(min(num_cashiers, len(CASHIER_DESK_COLS))):
         staff.append(StaffMember(StaffMember.CASHIER, CASHIER_DESK_COLS[i], CASHIER_DESK_ROW))
-    # Ushers
     for i in range(min(num_ushers, len(USHER_DESK_COLS))):
         staff.append(StaffMember(StaffMember.USHER, USHER_DESK_COLS[i], USHER_DESK_ROW))
-    # Servers
     for i in range(min(num_servers, len(SNACK_DESK_COLS))):
         staff.append(StaffMember(StaffMember.SERVER, SNACK_DESK_COLS[i], SNACK_DESK_ROW))
     return staff

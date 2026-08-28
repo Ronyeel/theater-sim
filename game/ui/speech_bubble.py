@@ -1,7 +1,3 @@
-"""
-CinePlex Dreams — Speech Bubbles & Dialog Prompts
-Pop-in bubbles above characters and [E] interact prompts near zones.
-"""
 import pygame
 import math
 from game.settings import C_NEON_GOLD, C_NEON_PINK, C_TEXT_WHITE, C_BG_DARK
@@ -25,7 +21,6 @@ SPEECH_LINES = [
 
 
 class SpeechBubble:
-    """A pop-in speech bubble that fades out above a world position."""
 
     _font = None
 
@@ -40,13 +35,13 @@ class SpeechBubble:
         self.max_life = lifetime
         self.color    = color
         self.alive    = True
-        self._scale_t = 0.0  # pop-in progress (0→1)
+        self._scale_t = 0.0
         self._rendered = SpeechBubble._font.render(text, True, (50, 40, 60))
 
     def update(self, dt: float):
         self._scale_t = min(1.0, self._scale_t + dt * 6)
         self.lifetime -= dt
-        self.wy       -= 12 * dt   # float upward
+        self.wy       -= 12 * dt
         if self.lifetime <= 0:
             self.alive = False
 
@@ -54,7 +49,6 @@ class SpeechBubble:
         if not self.alive: return
         sx, sy = camera.world_to_screen(self.wx, self.wy)
 
-        # Pop-in scale
         scale = min(1.0, self._scale_t)
         if scale <= 0: return
 
@@ -64,19 +58,15 @@ class SpeechBubble:
         bh   = th + pad*2 + 6
 
         bubble = pygame.Surface((bw, bh), pygame.SRCALPHA)
-        # Background
         pygame.draw.rect(bubble, (255, 255, 255, 230), (0, 0, bw, bh-6), border_radius=6)
         pygame.draw.rect(bubble, (160, 150, 160), (0, 0, bw, bh-6), 1, border_radius=6)
-        # Tail
         pygame.draw.polygon(bubble, (255, 255, 255, 230),
                             [(bw//2-4, bh-6), (bw//2+4, bh-6), (bw//2, bh)])
         bubble.blit(self._rendered, (pad, pad))
 
-        # Alpha based on lifetime
         alpha = min(255, int(255 * min(1.0, self.lifetime / 0.5)))
         bubble.set_alpha(alpha)
 
-        # Scale
         if scale < 1.0:
             nw, nh = int(bw*scale), int(bh*scale)
             if nw < 1 or nh < 1: return
@@ -87,7 +77,6 @@ class SpeechBubble:
 
 
 class DialogPrompt:
-    """The [E] interaction hint shown near an active zone."""
 
     _font    = None
     _sm_font = None
@@ -117,7 +106,6 @@ class DialogPrompt:
         pulse = 0.85 + 0.15 * math.sin(self._t * 4.0)
         color = tuple(int(c * pulse) for c in C_NEON_GOLD[:3])
 
-        # Key hint box
         s = DialogPrompt._font.render(self._text, True, color)
         pad = 8
         w, h = s.get_width() + pad*2, s.get_height() + pad*2

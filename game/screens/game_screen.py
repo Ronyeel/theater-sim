@@ -1,8 +1,3 @@
-"""
-CinePlex Dreams — Spectator Simulation Screen
-Sandbox view: interactive draggable camera, real-time tilemap, staff, NPCs,
-SimPy queue simulation telemetry, particles, and speech bubbles.
-"""
 from typing import Optional, Callable
 import math
 import random
@@ -21,13 +16,15 @@ from game.settings import (
 from game.core.camera import Camera
 from game.core.tilemap import TileMap, tile_at
 from game.core.particles import ParticleSystem
-from game.core import asset_loader as AL
 from game.entities.npc import build_npcs
 from game.backend_bridge import TheaterSimulationBridge
 from game.world.interactions import build_zones
 from game.ui.speech_bubble import SpeechBubble
 from game.ui.simulation_panel import SimulationPanel
 from game.ui.hud import HUD
+
+
+from game.core.lighting import LightingSystem
 
 
 def _font(name, size, bold=False):
@@ -38,7 +35,6 @@ def _font(name, size, bold=False):
 
 
 class GameScreen:
-    """Main spectator sandbox and real-time theater simulation screen."""
 
     def __init__(
         self,
@@ -50,12 +46,10 @@ class GameScreen:
         self.go_results = go_results or go_title
         self._t = 0.0
 
-        # Sandbox Camera & world
         self.camera = Camera()
         self.tilemap = TileMap()
         self._world_surface = pygame.Surface((SCREEN_W, SCREEN_H))
 
-        # Simulation backend
         if bridge is not None:
             self.simulation = bridge
             self._num_cashiers = bridge.num_cashiers
@@ -71,24 +65,22 @@ class GameScreen:
                 seed=42, on_arrival=self._spawn_simulation_npc,
             )
 
-        # Zones & staff
         self.staff = []
         self.zones = build_zones(self._num_cashiers, self._num_ushers, self._num_servers)
 
-        # Particles & UI bubbles
         self.particles = ParticleSystem()
         self.bubbles: list[SpeechBubble] = []
+        self.lighting = LightingSystem()
 
-        # NPCs
         self.npcs = []
         self._movie_finished = False
+        self._finish_timer = 0.0
+        self._finish_notified = False
+        self._finish_banner_rect = pygame.Rect(SCREEN_W // 2 - 250, 95, 500, 48)
 
-        # In-game control panel & HUD
         self.simulation_panel = SimulationPanel(self.simulation, self._apply_simulation_config)
         self.hud = HUD(self.simulation, npcs_provider=lambda: self.npcs)
 
-
-        # Screen transition fade
         self._fading = False
         self._fade_alpha = 0
         self._fade_surf = pygame.Surface((SCREEN_W, SCREEN_H))
@@ -96,21 +88,52 @@ class GameScreen:
         self._show_collision_debug = False
 
     def _apply_simulation_config(self, config: dict):
-        """Apply a control-panel configuration as a clean, visible run."""
+        should_reset = config.get("reset", False)
         bridge = self.simulation
         for key, value in config.items():
-            setattr(bridge, key, value)
-        bridge.reset()
-        self._num_cashiers = bridge.num_cashiers
-        self._num_ushers = bridge.num_ushers
-        self._num_servers = bridge.num_servers
-        self.zones = build_zones(self._num_cashiers, self._num_ushers, self._num_servers)
-        self.npcs = []
-        self._movie_finished = False
-        self.hud.add_log("Simulation restarted with new settings.", C_NEON_GOLD)
+            if key != "reset":
+                setattr(bridge, key, value)
+
+        if should_reset:
+            bridge.reset()
+            self._num_cashiers = bridge.num_cashiers
+            self._num_ushers = bridge.num_ushers
+            self._num_servers = bridge.num_servers
+            self.zones = build_zones(self._num_cashiers, self._num_ushers, self._num_servers)
+            self.npcs = []
+            self._movie_finished = False
+            self._finish_timer = 0.0
+            self._finish_notified = False
+            self.hud.add_log("Simulation restarted with new settings.", C_NEON_GOLD)
+        else:
+            self._num_cashiers = bridge.num_cashiers
+            self._num_ushers = bridge.num_ushers
+            self._num_servers = bridge.num_servers
+
+            if hasattr(bridge, "theater") and bridge.theater is not None:
+                bridge.theater.num_cashiers = self._num_cashiers
+                bridge.theater.num_ushers = self._num_ushers
+                bridge.theater.num_servers = self._num_servers
+                if hasattr(bridge.theater.cashier, "_capacity"):
+                    bridge.theater.cashier._capacity = max(1, self._num_cashiers)
+                if hasattr(bridge.theater.usher, "_capacity"):
+                    bridge.theater.usher._capacity = max(1, self._num_ushers)
+                if hasattr(bridge.theater.server, "_capacity"):
+                    bridge.theater.server._capacity = max(1, self._num_servers)
+
+            self.zones = build_zones(self._num_cashiers, self._num_ushers, self._num_servers)
+            for npc in self.npcs:
+                npc.set_service_capacity(self._num_cashiers, self._num_ushers, self._num_servers)
+
+            self.hud.add_log(
+                f"Live staffing updated: {self._num_cashiers}C | {self._num_ushers}U | {self._num_servers}S",
+                C_NEON_CYAN,
+            )
+
 
     def _spawn_simulation_npc(self, moviegoer_id: int):
-        """Create exactly one visual guest for every SimPy arrival."""
+        if moviegoer_id >= 200 and (moviegoer_id % 5 != 0):
+            return
         guests = build_npcs(1, slot_offset=moviegoer_id)
         for guest in guests:
             guest.set_service_capacity(
@@ -118,29 +141,35 @@ class GameScreen:
             )
         self.npcs.extend(guests)
 
-    # ── Event Handling ───────────────────────────────────────────────────
 
     def handle_event(self, evt: pygame.event.Event):
-        # Allow simulation configuration panel to intercept events first
         if self.simulation_panel.handle_event(evt):
             return
 
-        self.hud.handle_event(evt)
+        if not self.simulation.is_running:
+            if evt.type == pygame.KEYDOWN and evt.key in (pygame.K_RETURN, pygame.K_SPACE):
+                self.go_results()
+                return
+            if evt.type == pygame.MOUSEBUTTONDOWN and evt.button == 1:
+                if self._finish_banner_rect.collidepoint(evt.pos):
+                    self.go_results()
+                    return
 
-        # Mouse Drag-to-Pan (Sandbox camera)
+        if self.hud.handle_event(evt):
+            return
+
         if evt.type == pygame.MOUSEBUTTONDOWN:
-            if evt.button in (1, 2, 3):  # Left, Middle, or Right drag
+            if evt.button in (1, 2, 3):
                 self.camera.start_drag(evt.pos)
+
         elif evt.type == pygame.MOUSEBUTTONUP:
             if evt.button in (1, 2, 3):
                 self.camera.stop_drag()
         elif evt.type == pygame.MOUSEMOTION:
             self.camera.handle_mouse_motion(evt.pos, evt.buttons)
         elif evt.type == pygame.MOUSEWHEEL:
-            # Zoom anchored at cursor position
             self.camera.adjust_zoom(0.08 * evt.y, focus_pos=pygame.mouse.get_pos())
 
-        # Keyboard shortcuts
         elif evt.type == pygame.KEYDOWN:
             if evt.key == pygame.K_F1:
                 self.simulation_panel.open()
@@ -148,17 +177,19 @@ class GameScreen:
                 is_p = getattr(self.simulation, "is_paused", False)
                 self.simulation.is_paused = not is_p
                 self.hud.add_log("Simulation PAUSED" if self.simulation.is_paused else "Simulation RESUMED", C_NEON_CYAN)
+            elif evt.key == pygame.K_f:
+                speeds = [1, 2, 5, 10]
+                cur_idx = speeds.index(self.simulation.speed) if self.simulation.speed in speeds else 0
+                next_speed = speeds[(cur_idx + 1) % len(speeds)]
+                self.simulation.speed = next_speed
+                self.hud.add_log(f"Fast Forward: {next_speed}x", C_NEON_CYAN)
             elif evt.key in (pygame.K_r, pygame.K_TAB):
                 self.simulation.reset()
                 self.npcs = []
                 self._movie_finished = False
+                self._finish_timer = 0.0
+                self._finish_notified = False
                 self.hud.add_log("Simulation reset.", C_NEON_GOLD)
-            elif evt.key == pygame.K_1:
-                self._show_collision_debug = not self._show_collision_debug
-                self.hud.add_log(
-                    "Collision view ON" if self._show_collision_debug else "Collision view OFF",
-                    C_NEON_CYAN,
-                )
             elif evt.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
                 self.camera.adjust_zoom(0.1)
             elif evt.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
@@ -166,7 +197,6 @@ class GameScreen:
             elif evt.key == pygame.K_ESCAPE:
                 self.go_title()
 
-    # ── Update ───────────────────────────────────────────────────────────
 
     def update(self, dt: float):
         self._t += dt
@@ -175,7 +205,6 @@ class GameScreen:
         if self.simulation_panel.visible:
             return
 
-        # Keyboard camera panning (WASD / Arrow keys)
         keys = pygame.key.get_pressed()
         pdx = (1 if keys[pygame.K_d] or keys[pygame.K_RIGHT] else 0) - (1 if keys[pygame.K_a] or keys[pygame.K_LEFT] else 0)
         pdy = (1 if keys[pygame.K_s] or keys[pygame.K_DOWN] else 0) - (1 if keys[pygame.K_w] or keys[pygame.K_UP] else 0)
@@ -184,54 +213,53 @@ class GameScreen:
 
         self.camera.update(dt)
 
-        # Simulation clock and speed
-        sim_dt = dt * self.simulation.speed
+        is_paused = getattr(self.simulation, "is_paused", False)
+        sim_dt = 0.0 if is_paused else (dt * self.simulation.speed)
 
-        # Tilemap
-        self.tilemap.update(sim_dt)
+        if not is_paused:
+            self.tilemap.update(sim_dt)
 
-        # Staff
-        for staff in self.staff:
-            staff.update(sim_dt)
+            for staff in self.staff:
+                staff.update(sim_dt)
 
-        # Zones
-        for z in self.zones:
-            z.update(sim_dt)
+            for z in self.zones:
+                z.update(sim_dt)
 
-        # NPCs
-        for npc in self.npcs:
-            npc.update(sim_dt, self.npcs, movie_finished=self._movie_finished)
-        self.npcs = [npc for npc in self.npcs if not npc.has_left]
+            for npc in self.npcs:
+                npc.update(sim_dt, self.npcs, movie_finished=self._movie_finished)
+            self.npcs = [npc for npc in self.npcs if not npc.has_left]
 
-        # Advance backend queue simulation
-        self.simulation.update(dt)
-        if not self.simulation.is_running:
-            self._movie_finished = True
+            self.simulation.update(dt)
+            if not self.simulation.is_running:
+                if not self._finish_notified:
+                    self._movie_finished = True
+                    self._finish_notified = True
+                    self.hud.add_log("SIMULATION FINISHED! Generating report card...", C_NEON_GOLD)
 
-        # Particles & Speech bubbles
-        self.particles.update(dt)
-        for b in self.bubbles:
-            b.update(dt)
-        self.bubbles = [b for b in self.bubbles if b.alive]
+                self._finish_timer += dt
+                if self._finish_timer >= 2.0:
+                    self.go_results()
+                    return
 
-        # HUD
+            self.particles.update(dt)
+            for b in self.bubbles:
+                b.update(dt)
+            self.bubbles = [b for b in self.bubbles if b.alive]
+
+        self.lighting.update(sim_dt if not is_paused else dt * 0.5)
         self.hud.update(dt)
 
-        # Fade out
         if self._fading:
             self._fade_alpha = min(255, self._fade_alpha + 160 * dt)
             if self._fade_alpha >= 255:
                 self.go_title()
                 self._fading = False
 
-    # ── Render ───────────────────────────────────────────────────────────
 
     def _draw_exterior(self, surface: pygame.Surface):
-        """Plain backdrop visible around the theater when zoomed out."""
         surface.fill((7, 12, 28))
 
     def _draw_stall_availability(self, surface: pygame.Surface):
-        """Label fixed visual stalls whose corresponding resource is closed."""
         groups = (
             (CASHIER_DESK_COLS, CASHIER_DESK_ROW, self._num_cashiers),
             (USHER_DESK_COLS, USHER_DESK_ROW, self._num_ushers),
@@ -254,7 +282,6 @@ class GameScreen:
                 surface.blit(text, (badge.x + 4, badge.y + 2))
 
     def _draw_collision_debug(self, surface: pygame.Surface):
-        """Draw the exact movement bounds used by the collision code."""
         stall_tiles = {TILE_DESK, TILE_SNACK, TILE_USHER, TILE_SECURITY}
         for row in range(MAP_ROWS):
             for col in range(MAP_COLS):
@@ -279,7 +306,6 @@ class GameScreen:
         surface.blit(panel, (8, 32))
 
     def draw(self, surface: pygame.Surface):
-        # Render the world view at current zoom
         view_size = (
             math.ceil(SCREEN_W / self.camera.zoom),
             math.ceil(SCREEN_H / self.camera.zoom),
@@ -289,41 +315,50 @@ class GameScreen:
         world = self._world_surface
         self._draw_exterior(world)
 
-        # Tilemap
         self.tilemap.draw(world, self.camera)
         self._draw_stall_availability(world)
 
-        # Zone glows
-        for z in self.zones:
-            z.draw_glow(world, self.camera)
-
-        # NPCs
         for npc in self.npcs:
             npc.draw(world, self.camera)
 
-        # Staff
         for staff in self.staff:
             staff.draw(world, self.camera)
 
         if self._show_collision_debug:
             self._draw_collision_debug(world)
 
-        # Particles
         self.particles.draw(world, self.camera)
 
-        # Speech bubbles
         for b in self.bubbles:
             b.draw(world, self.camera)
 
-        # Blit world view to display
+        self.lighting.draw_world_lighting(world, self.camera)
+
         if abs(self.camera.zoom - 1.0) < 0.001:
             surface.blit(world, (0, 0))
         else:
             surface.blit(pygame.transform.scale(world, (SCREEN_W, SCREEN_H)), (0, 0))
 
-        # UI overlays (HUD & Simulation Settings panel)
+        self.lighting.draw_vignette(surface)
+
         self.hud.draw(surface)
         self.simulation_panel.draw(surface)
+
+
+        if not self.simulation.is_running:
+            rect = self._finish_banner_rect
+            banner = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            banner.fill((12, 10, 30, 240))
+            surface.blit(banner, rect.topleft)
+            pygame.draw.rect(surface, C_NEON_GOLD, rect, 2, border_radius=6)
+
+            title_f = _font("consolas", 14, bold=True)
+            sub_f = _font("consolas", 11)
+            t1 = title_f.render("SIMULATION COMPLETED", True, C_NEON_GOLD)
+            t2 = sub_f.render("Opening Summary Report Card... [Press ENTER or Click]", True, C_TEXT_WHITE)
+            surface.blit(t1, (rect.centerx - t1.get_width() // 2, rect.y + 6))
+            surface.blit(t2, (rect.centerx - t2.get_width() // 2, rect.y + 26))
+
         if self._fade_alpha > 0:
             self._fade_surf.set_alpha(int(self._fade_alpha))
             surface.blit(self._fade_surf, (0, 0))

@@ -1,8 +1,3 @@
-"""
-Pre-Simulation Setup Screen
-Provides interactive situation presets and fine-tuning number fields for staff configuration
-(cashiers, ushers, servers), arrival intervals, runtime duration, food demand, and simulation speed.
-"""
 
 from typing import Callable, List, Tuple, Optional
 import math
@@ -24,7 +19,6 @@ def _get_font(name: str, size: int, bold: bool = False) -> pygame.font.Font:
 
 
 class SetupScreen:
-    """Pre-simulation configuration screen with scenario presets and custom number fields."""
 
     def __init__(self, bridge, go_game: Callable[[], None], go_back: Optional[Callable[[], None]] = None) -> None:
         self.bridge = bridge
@@ -37,48 +31,58 @@ class SetupScreen:
         self._body_font = _get_font("consolas", 13)
         self._small_font = _get_font("consolas", 11)
 
-        self.panel = pygame.Rect((SCREEN_W - 640) // 2, 45, 640, 590)
+        self.panel = pygame.Rect((SCREEN_W - 680) // 2, 35, 680, 650)
         x = self.panel.x + 28
         width = self.panel.width - 56
 
         self._scenario_rects: List[Tuple[str, pygame.Rect]] = []
         for index, key in enumerate(SCENARIOS):
-            self._scenario_rects.append((key, pygame.Rect(x, self.panel.y + 66 + index * 38, width, 32)))
+            self._scenario_rects.append((key, pygame.Rect(x, self.panel.y + 68 + index * 36, width, 30)))
 
-        field_y = self.panel.y + 276
-        self.cashiers = NumberInput(pygame.Rect(x, field_y, 260, 34), "Cashiers (box office)", 0, 9999,
-                                    bridge.num_cashiers, C_NEON_GOLD)
-        self.ushers = NumberInput(pygame.Rect(x + 320, field_y, 260, 34), "Ushers (ticket checkpoint)", 0, 9999,
-                                  bridge.num_ushers, C_NEON_PINK)
-        self.servers = NumberInput(pygame.Rect(x, field_y + 67, 260, 34), "Servers (concession stand)", 0, 9999,
-                                   bridge.num_servers, C_NEON_CYAN)
-        self.arrivals = NumberInput(pygame.Rect(x + 320, field_y + 67, 260, 34), "Arrival gap (sec)", 1, 9999,
+        field_y = self.panel.y + 266
+        col_w = 295
+        col2_x = x + 325
+
+        cashiers_val = bridge.num_cashiers if bridge.num_cashiers > 0 else 2
+        ushers_val = bridge.num_ushers if bridge.num_ushers > 0 else 1
+        servers_val = bridge.num_servers if bridge.num_servers > 0 else 2
+
+        self.cashiers = NumberInput(pygame.Rect(x, field_y, col_w, 34), "Cashiers (box office)", 1, 9999,
+                                    cashiers_val, C_NEON_GOLD)
+        self.ushers = NumberInput(pygame.Rect(col2_x, field_y, col_w, 34), "Ushers (ticket checkpoint)", 1, 9999,
+                                  ushers_val, C_NEON_PINK)
+        self.servers = NumberInput(pygame.Rect(x, field_y + 68, col_w, 34), "Servers (concession stand)", 1, 9999,
+                                   servers_val, C_NEON_CYAN)
+        self.arrivals = NumberInput(pygame.Rect(col2_x, field_y + 68, col_w, 34), "Arrival gap (sec)", 1, 9999,
                                     round(bridge.arrival_interval * 100), C_TEXT_WHITE)
-        self.runtime = NumberInput(pygame.Rect(x, field_y + 134, 260, 34), "Runtime (minutes)", 1, 9999,
+        self.runtime = NumberInput(pygame.Rect(x, field_y + 136, col_w, 34), "Runtime (minutes)", 1, 9999,
                                    bridge.runtime, C_TEXT_WHITE)
-        self.food = NumberInput(pygame.Rect(x + 320, field_y + 134, 260, 34), "Food demand (%)", 0, 100,
+        self.food = NumberInput(pygame.Rect(col2_x, field_y + 136, col_w, 34), "Food demand (%)", 0, 100,
                                 round(bridge.food_prob * 100), C_NEON_CYAN)
         self.fields = [self.cashiers, self.ushers, self.servers, self.arrivals, self.runtime, self.food]
 
         self._speed = bridge.speed
         self.speed_buttons: List[Tuple[int, Button]] = []
+        speed_w = 44
+        speed_gap = 8
         for index, speed in enumerate((1, 2, 5, 10)):
-            button = Button(pygame.Rect(x + index * 70, self.panel.bottom - 74, 60, 30),
+            button = Button(pygame.Rect(x + index * (speed_w + speed_gap), self.panel.bottom - 54, speed_w + (4 if speed == 10 else 0), 32),
                             f"{speed}×", C_NEON_CYAN, 13)
             button.on_click(lambda value=speed: self._set_speed(value))
             self.speed_buttons.append((speed, button))
 
-        # Back & Start Simulation Buttons
-        self.btn_back = Button(pygame.Rect(self.panel.right - 350, self.panel.bottom - 76, 120, 36),
-                               "← BACK", (170, 160, 190), 13)
+        btn_y = self.panel.bottom - 54
+        self.btn_back = Button(pygame.Rect(self.panel.right - 28 - 180 - 14 - 120, btn_y, 120, 34),
+                               "BACK", (170, 160, 190), 13)
         if self.go_back:
             self.btn_back.on_click(self.go_back)
 
-        self.btn_start = Button(pygame.Rect(self.panel.right - 215, self.panel.bottom - 76, 190, 36),
-                                "▶  START SIMULATION", C_NEON_GOLD, 13)
+        self.btn_start = Button(pygame.Rect(self.panel.right - 28 - 180, btn_y, 180, 34),
+                                "START SIMULATION", C_NEON_GOLD, 13)
         self.btn_start.on_click(self._on_start)
 
-        # Background ambient stars
+
+
         self._stars = [
             (random.uniform(0, SCREEN_W), random.uniform(0, SCREEN_H), random.uniform(0, math.pi * 2))
             for _ in range(50)
@@ -95,7 +99,6 @@ class SetupScreen:
         self.runtime.value = config["runtime"]
 
     def _on_start(self) -> None:
-        """Apply the chosen situation parameters to the simulation bridge and launch."""
         b = self.bridge
         b.num_cashiers = self.cashiers.value
         b.num_ushers = self.ushers.value
@@ -141,7 +144,6 @@ class SetupScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(C_BG_DARK)
 
-        # Ambient twinkling stars
         for x, y, phase in self._stars:
             alpha = int(140 + 90 * math.sin(self._t * 2.0 + phase))
             pygame.draw.circle(surface, (alpha, alpha, int(alpha * 0.9)), (int(x), int(y)), 1)
@@ -152,7 +154,6 @@ class SetupScreen:
         draw_text(surface, "Choose a preset or customize parameters before starting the simulation.",
                   self._small_font, C_TEXT_DIM, (self.panel.x + 26, self.panel.y + 46))
 
-        # Scenario Presets
         for key, rect in self._scenario_rects:
             config = SCENARIOS[key]
             selected = key == self._scenario_key
@@ -166,22 +167,19 @@ class SetupScreen:
             detail = self._small_font.render(details, True, C_NEON_GOLD if selected else (150, 128, 190))
             surface.blit(detail, (rect.right - detail.get_width() - 12, rect.y + 10))
 
-        # Divider line
         pygame.draw.line(surface, (85, 65, 120), (self.panel.x + 28, self.panel.y + 258),
                          (self.panel.right - 28, self.panel.y + 258), 1)
 
-        # Number input fields
         for field in self.fields:
             field.draw(surface)
 
-        # Speed selector
         draw_text(surface, "Simulation speed", self._small_font, C_TEXT_DIM,
-                  (self.panel.x + 28, self.panel.bottom - 100))
+                  (self.panel.x + 28, self.panel.bottom - 74))
+
         for speed, button in self.speed_buttons:
             if speed == self._speed:
                 pygame.draw.rect(surface, C_NEON_CYAN, button.rect, 2, border_radius=6)
             button.draw(surface)
 
-        # Action buttons
         self.btn_back.draw(surface)
         self.btn_start.draw(surface)

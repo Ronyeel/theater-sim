@@ -1,4 +1,3 @@
-# game/screens
 from game.screens.main_menu import MainMenu
 from game.screens.setup_screen import SetupScreen
 from game.screens.exterior_screen import ExteriorScreen

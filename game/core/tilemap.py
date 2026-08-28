@@ -1,7 +1,3 @@
-"""
-CinePlex Dreams — Tile Map (30×40 Full Cinema Interior)
-Renders the cinema grid: lobby → ticket area → usher → concession → corridor → auditorium.
-"""
 import pygame
 import math
 from game.settings import (
@@ -14,11 +10,10 @@ from game.settings import (
 )
 from game.core import asset_loader as AL
 
-# Short aliases for readability in the map grid
 W  = TILE_WALL
 F  = TILE_FLOOR
 C  = TILE_CARPET
-D  = TILE_DESK      # cashier desk
+D  = TILE_DESK
 S  = TILE_SEAT
 DR = TILE_DOOR
 N  = TILE_NEON
@@ -32,85 +27,34 @@ PL = TILE_PLANT
 T  = TILE_TABLE
 CR = TILE_CORRIDOR
 
-# Queue-rope tiles are physical barriers.  Keeping them out of the walkable
-# set prevents NPCs (and the player) from clipping through the rope line.
+
 WALKABLE = {TILE_FLOOR, TILE_CARPET, TILE_SEAT, TILE_DOOR, TILE_CORRIDOR}
 
-# ── 20 cols × 25 rows ────────────────────────────────────────────────────
-# Layout (bottom-to-top flow):
-#   Row  0   : Top wall
-#   Row  1   : Cinema screen
-#   Row  2   : Carpet aisle
-#   Rows 3-6 : Auditorium seating (4 rows)
-#   Row  7   : Theater entrance doors
-#   Row  8   : Cinema corridor
-#   Row  9   : Behind concession wall
-#   Row 10   : Snack counters (behind)
-#   Row 11   : Snack queue
-#   Row 12   : Open walking area
-#   Row 13   : Usher queue
-#   Row 14   : Usher desks
-#   Row 15   : Post-cashier walkway
-#   Row 16   : Behind cashier wall
-#   Row 17   : Cashier desks
-#   Row 18   : Queue area
-#   Row 19   : Queue ropes
-#   Row 20   : Lobby open
-#   Row 21   : Lobby (security, tables, board)
-#   Row 22   : Lobby open
-#   Row 23   : Neon marquee strip + exit passage
-#   Row 24   : Bottom wall + exit doors
-
 THEATER_MAP = [
-    # Row 0: Top wall
     [W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W],
-    # Row 1: Cinema screen
     [W, C, C, C,SC,SC,SC,SC,SC,SC,SC,SC,SC,SC,SC,SC, C, C, C, W],
-    # Row 2: Carpet aisle
-    [W, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, W],
-    # Row 3: Seat row 1
-    [W, C, S, S, S, S, S, S, C, C, C, C, S, S, S, S, S, S, C, W],
-    # Row 4: Seat row 2
-    [W, C, S, S, S, S, S, S, C, C, C, C, S, S, S, S, S, S, C, W],
-    # Row 5: Seat row 3
-    [W, C, S, S, S, S, S, S, C, C, C, C, S, S, S, S, S, S, C, W],
-    # Row 6: Seat row 4
-    [W, C, S, S, S, S, S, S, C, C, C, C, S, S, S, S, S, S, C, W],
-    # Row 7: Theater entrance doors
-    [W, W, W, W, W,W,W,W,DR,DR,DR,DR, W, W, W, W, W, W, W, W],
-    # Row 8: Cinema corridor
+    [W, C, S, S, S, S, S, C, C, C, C, C, C, S, S, S, S, S, C, W],
+    [W, C, S, S, S, S, S, C, C, C, C, C, C, S, S, S, S, S, C, W],
+    [W, C, S, S, S, S, S, C, C, C, C, C, C, S, S, S, S, S, C, W],
+    [W, C, S, S, S, S, S, C, C, C, C, C, C, S, S, S, S, S, C, W],
+    [W, C, S, S, S, S, S, C, C, C, C, C, C, S, S, S, S, S, C, W],
+    [W, W, W, W, W, W, W, W,DR,DR,DR,DR, W, W, W, W, W, W, W, W],
     [W,CR,CR, P,CR,CR,CR,CR,CR,CR,CR,CR,CR,CR,CR,CR, P,CR,CR, W],
-    # Row 9: Behind concession (wall)
     [W, W, W, W, W, W, F, F, W, W, F, F, W, W, W, W, W, W, W, W],
-    # Row 10: Snack counters
     [W, W, W, W,SN,SN, F, F,SN,SN, F, F,SN,SN, W, W, W, W, W, W],
-    # Row 11: Snack queue area
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 12: Open walking area
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 13: Usher queue
     [W, F, F, F, F, F, F, Q, F, F, F, F, Q, F, F, F, F, F, F, W],
-    # Row 14: Usher desks
     [W, Q, Q, Q, Q, Q, Q, U, F, F, F, F, U, Q, Q, Q, Q, Q, Q, W],
-    # Row 15: Post-cashier walkway
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 16: Behind cashier (wall)
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 17: Cashier desks
     [W, Q, Q, Q, D, F, F, D, F, F, D, F, F, D, Q, Q, Q, Q, Q, W],
-    # Row 18: Queue area in front of cashiers
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 19: Queue ropes
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 20: Lobby open
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 21: Lobby — security (left), table (center), board (right)
     [W, F, F,SE, F, F, F, F, T, F, F, T, F, F, F, P, P, F, F, W],
-    # Row 22: Lobby open
     [W, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, F, W],
-    # Row 23: Neon marquee strip + exit passage
     [W, N, N, N, N, N, N, N, N,DR,DR, N, N, N, N, N, N, N, N, W],
-    # Row 24: Bottom wall + exit doors
     [W, W, W, W, W, W, W, W, W,DR,DR, W, W, W, W, W, W, W, W, W],
 ]
 
@@ -137,7 +81,9 @@ class TileMap:
         self._dim_seat_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
         self._dim_seat_surf.fill((0, 0, 0, 18))
 
-    def _get_tile_surf(self, tile_id: int) -> pygame.Surface | None:
+    def _get_tile_surf(self, tile_id: int, col: int = 0, row: int = 0) -> pygame.Surface | None:
+        if tile_id == TILE_POSTER:
+            return AL.tile_poster_for(col, row)
         if tile_id in self._tile_cache:
             return self._tile_cache[tile_id]
         fn = AL.TILE_FUNCS.get(tile_id)
@@ -151,7 +97,6 @@ class TileMap:
     def draw(self, surface: pygame.Surface, camera):
         cam_x, cam_y = int(camera.x), int(camera.y)
 
-        # Visible tile range
         col_start = max(0, cam_x // TILE_SIZE)
         col_end   = min(MAP_COLS, col_start + surface.get_width() // TILE_SIZE + 2)
         row_start = max(0, cam_y // TILE_SIZE)
@@ -165,54 +110,22 @@ class TileMap:
                 sx = col * TILE_SIZE - cam_x
                 sy = row * TILE_SIZE - cam_y
 
-                # Base fill
                 surface.fill(C_BG_DARK, (sx, sy, TILE_SIZE, TILE_SIZE))
 
-                surf = self._get_tile_surf(tile_id)
+                surf = self._get_tile_surf(tile_id, col, row)
                 if surf:
-                    # If surface is taller than TILE_SIZE, offset it UP so it draws correctly in 2.5D
                     dy = sy - (surf.get_height() - TILE_SIZE)
                     surface.blit(surf, (sx, dy))
 
-                # ── Animated effects (reusing preallocated surface) ───
-
-                # Neon marquee flicker
-                if tile_id == TILE_NEON:
-                    flicker = 0.6 + 0.4 * math.sin(self._anim_t * 4.0 + col * 0.7)
-                    glow.fill((*C_NEON_PINK[:3], int(30 * flicker)))
-                    surface.blit(glow, (sx, sy))
-
-                # Cinema screen glow — pulsing blue/white light
-                elif tile_id == TILE_SCREEN:
+                if tile_id == TILE_SCREEN:
                     pulse = int(20 + 15 * math.sin(self._anim_t * 1.5))
                     glow.fill((*C_NEON_CYAN[:3], pulse))
                     surface.blit(glow, (sx, sy))
 
-                # Theater seat area — subtle darkness to simulate dim auditorium
                 elif tile_id == TILE_SEAT:
                     surface.blit(self._dim_seat_surf, (sx, sy))
 
-                # Carpet aisle glow — faint warm light from screen
-                elif tile_id == TILE_CARPET and 1 <= row <= 6:
-                    dist = (row - 1) / 5.0
-                    alpha = int(12 * (1 - dist) + 4 * math.sin(self._anim_t * 1.2))
-                    glow.fill((100, 160, 220, max(0, alpha)))
-                    surface.blit(glow, (sx, sy))
-
-                # Poster spotlight
-                elif tile_id == TILE_POSTER:
-                    pulse = int(8 + 6 * math.sin(self._anim_t * 2.0 + col * 1.3))
-                    glow.fill((*C_NEON_GOLD[:3], pulse))
-                    surface.blit(glow, (sx, sy))
-
-                # Corridor floor — faint edge lighting
-                elif tile_id == TILE_CORRIDOR:
-                    a = int(6 + 4 * math.sin(self._anim_t * 0.8 + col * 0.5))
-                    glow.fill((80, 50, 120, a))
-                    surface.blit(glow, (sx, sy))
-
     def draw_seats(self, surface: pygame.Surface, camera):
-        """Draw auditorium seats in a secondary pass on top of seated NPCs so only heads peek out."""
         cam_x, cam_y = int(camera.x), int(camera.y)
         col_start = max(0, cam_x // TILE_SIZE)
         col_end   = min(MAP_COLS, col_start + surface.get_width() // TILE_SIZE + 2)

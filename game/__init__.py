@@ -1,7 +1,3 @@
-"""
-CinePlex Dreams — Theater Simulation Package
-Interactive 2D visualization and discrete-event queuing simulation engine.
-"""
 
 from game.backend_bridge import TheaterSimulationBridge, SimulationStats
 

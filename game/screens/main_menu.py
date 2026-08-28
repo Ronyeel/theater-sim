@@ -1,7 +1,3 @@
-"""
-Main Menu Screen
-Animated title over retro neon cinema marquee with star particles and mode selection.
-"""
 
 from typing import Callable, Optional
 import math
@@ -23,7 +19,6 @@ def _get_font(name: str, size: int, bold: bool = False) -> pygame.font.Font:
 
 
 class Star:
-    """Twinkling background star particle."""
 
     def __init__(self) -> None:
         self.x = random.uniform(0, SCREEN_W)
@@ -44,7 +39,6 @@ class Star:
 
 
 class MainMenu:
-    """Main menu title screen."""
 
     def __init__(self, go_start: Callable[[], None], go_setup: Optional[Callable[[], None]] = None) -> None:
         self.go_start = go_start
@@ -63,15 +57,16 @@ class MainMenu:
 
         self.btn_start = Button(
             pygame.Rect(cx - 150, by, 300, 46),
-            "▶  START SIMULATION", C_NEON_GOLD, 15,
+            "START SIMULATION", C_NEON_GOLD, 15,
         )
         self.btn_start.on_click(self.go_start)
 
         self.btn_setup = Button(
             pygame.Rect(cx - 150, by + 56, 300, 42),
-            "⚙  CUSTOM SETUP", C_NEON_CYAN, 14,
+            "CUSTOM SETUP", C_NEON_CYAN, 14,
         )
         self.btn_setup.on_click(self.go_setup)
+
 
     def handle_event(self, evt: pygame.event.Event) -> None:
         self.btn_start.handle_event(evt)
@@ -86,30 +81,34 @@ class MainMenu:
         self.btn_setup.update(dt)
 
     def draw(self, surface: pygame.Surface) -> None:
-        # Animated GIF Background
         bg = AL.menu_background(self._t)
         surface.blit(bg, (0, 0))
 
-        # Dark overlay for readability
         ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
         ov.fill((0, 0, 0, 120))
         surface.blit(ov, (0, 0))
 
-        # Stars
         for star in self._stars:
             star.draw(surface, self._t)
 
-        # Title: Theater Simulator
 
-        ty = SCREEN_H // 2 - 20
-        glow = pygame.Surface((640, 80), pygame.SRCALPHA)
-        glow.fill((*C_NEON_GOLD[:3], 35))
-        surface.blit(glow, (SCREEN_W // 2 - 320, ty - 25))
+        logo = AL.menu_title_logo()
+        if logo:
+            logo_rect = logo.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2 - 70))
+            glow = pygame.Surface((logo_rect.width + 80, logo_rect.height + 40), pygame.SRCALPHA)
+            flicker = 0.85 + 0.15 * math.sin(self._t * 3.5)
+            glow.fill((*C_NEON_GOLD[:3], int(25 * flicker)))
+            surface.blit(glow, glow.get_rect(center=logo_rect.center))
+            surface.blit(logo, logo_rect)
+        else:
+            ty = SCREEN_H // 2 - 20
+            glow = pygame.Surface((640, 80), pygame.SRCALPHA)
+            glow.fill((*C_NEON_GOLD[:3], 35))
+            surface.blit(glow, (SCREEN_W // 2 - 320, ty - 25))
+            title_surf = self._title_f.render("THEATER SIMULATOR", True, C_NEON_GOLD)
+            surface.blit(title_surf, title_surf.get_rect(center=(SCREEN_W // 2, ty + 10)))
 
-        title_surf = self._title_f.render("THEATER SIMULATOR", True, C_NEON_GOLD)
-        surface.blit(title_surf, title_surf.get_rect(center=(SCREEN_W // 2, ty + 10)))
-
-        # Buttons
         self.btn_start.draw(surface)
         self.btn_setup.draw(surface)
+
 

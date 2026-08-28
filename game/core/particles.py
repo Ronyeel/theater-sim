@@ -1,7 +1,3 @@
-"""
-CinePlex Dreams — Particles
-Lightweight particle system: bursts, confetti, floating text, sparkles.
-"""
 import pygame
 import random
 import math
@@ -107,11 +103,9 @@ class ParticleSystem:
         h = surface.get_height()
         for p in self.particles:
             sx, sy = camera.world_to_screen(p.x, p.y)
-            # Frustum culling
             if sx < -10 or sx > w + 10 or sy < -10 or sy > h + 10:
                 continue
             if p.size <= 2:
-                # Fast direct draw for tiny sparkles/dust
                 pygame.draw.circle(surface, p.color, (int(sx), int(sy)), p.size)
             else:
                 a = max(0, min(255, int(255 * p.life / p.max_life)))

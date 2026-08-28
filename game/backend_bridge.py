@@ -1,22 +1,14 @@
-"""
-Simulation Backend Bridge
-Connects the discrete-event SimPy theater model with the Pygame real-time rendering loop.
-
-Maintains statistical snapshots, synchronizes simulation time steps with game delta-time,
-and manages customer arrival event callbacks for visual NPC spawning.
-"""
 
 from typing import List, Optional, Callable
 import random
 import simpy
 
-from src.theater import MovieTheater
+from src.theater import Theater
 from src.simulation import generate_moviegoers
 from src.stats import average_wait
 
 
 class SimulationStats:
-    """Read-only metrics snapshot consumed by the HUD, UI panels, and results screen."""
 
     def __init__(self) -> None:
         self.sim_time: float = 0.0
@@ -35,7 +27,6 @@ class SimulationStats:
 
 
 class TheaterSimulationBridge:
-    """Manages the SimPy environment execution alongside the Pygame event loop."""
 
     def __init__(
         self,
@@ -46,7 +37,7 @@ class TheaterSimulationBridge:
         food_probability: float = 0.50,
         runtime: float = 90.0,
         speed: int = 1,
-        seed: int = 42,
+        seed: Optional[int] = None,
         on_arrival: Optional[Callable[[int], None]] = None,
     ) -> None:
         self.num_cashiers = int(num_cashiers)
@@ -56,7 +47,7 @@ class TheaterSimulationBridge:
         self.food_prob = float(food_probability)
         self.runtime = float(runtime)
         self.speed = int(speed)
-        self.seed = int(seed)
+        self.seed = int(seed) if seed is not None else None
         self._on_arrival = on_arrival
 
         self.stats = SimulationStats()
@@ -65,16 +56,18 @@ class TheaterSimulationBridge:
         self.wait_times: List[float] = []
         self._arrival_count = [0]
         self.env: simpy.Environment = simpy.Environment()
-        self.theater: MovieTheater = MovieTheater(self.env, self.num_cashiers, self.num_servers, self.num_ushers)
+        self.theater: Theater = Theater(self.env, self.num_cashiers, self.num_servers, self.num_ushers)
 
         self.reset()
 
     def reset(self) -> None:
-        """Reset and initialize a fresh seeded SimPy environment."""
-        random.seed(self.seed)
+        if self.seed is not None:
+            random.seed(self.seed)
+        else:
+            random.seed()
         self.env = simpy.Environment()
         self.wait_times = []
-        self.theater = MovieTheater(
+        self.theater = Theater(
             self.env, self.num_cashiers, self.num_servers, self.num_ushers
         )
         self._arrival_count = [0]
@@ -93,15 +86,12 @@ class TheaterSimulationBridge:
         self.is_paused = False
 
     def pause(self) -> None:
-        """Pause simulation progression."""
         self.is_paused = True
 
     def resume(self) -> None:
-        """Resume simulation progression."""
         self.is_paused = False
 
     def toggle_pause(self) -> bool:
-        """Toggle paused state and return new state."""
         self.is_paused = not self.is_paused
         return self.is_paused
 
@@ -111,7 +101,6 @@ class TheaterSimulationBridge:
             self._on_arrival(moviegoer_id)
 
     def update(self, real_seconds: float) -> None:
-        """Advance simulated minutes proportionally to real delta-time and speed multiplier."""
         if not self.is_running or self.is_paused or real_seconds <= 0:
             return
 
@@ -119,13 +108,11 @@ class TheaterSimulationBridge:
         if target > self.env.now:
             self.env.run(until=target)
 
-        # Update metrics snapshot
         self.stats.sim_time = self.env.now
         self.stats.total_arrived = self._arrival_count[0]
         self.stats.total_seated = len(self.wait_times)
         self.stats.avg_wait = average_wait(self.wait_times)
 
-        # Queues
         if not self.theater.cashier_available:
             self.stats.cashier_queue = self.stats.active_guests
         else:
