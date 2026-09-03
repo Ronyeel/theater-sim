@@ -5,7 +5,7 @@ import random
 import pygame
 from game.settings import (
     SCREEN_W, SCREEN_H, C_NEON_GOLD, C_NEON_PINK,
-    C_NEON_CYAN, C_TEXT_WHITE, C_TEXT_DIM,
+    C_NEON_CYAN, C_BG_DARK, C_TEXT_WHITE, C_TEXT_DIM,
 )
 from game.core import asset_loader as AL
 from game.ui.button import Button
@@ -40,9 +40,15 @@ class Star:
 
 class MainMenu:
 
-    def __init__(self, go_start: Callable[[], None], go_setup: Optional[Callable[[], None]] = None) -> None:
+    def __init__(
+        self,
+        go_start: Callable[[], None],
+        go_setup: Optional[Callable[[], None]] = None,
+        go_booking: Optional[Callable[[], None]] = None,
+    ) -> None:
         self.go_start = go_start
         self.go_setup = go_setup or go_start
+        self.go_booking = go_booking or go_start
         self._t = 0.0
 
         self._title_f = _get_font("consolas", 56, bold=True)
@@ -53,24 +59,31 @@ class MainMenu:
         self._stars = [Star() for _ in range(80)]
 
         cx = SCREEN_W // 2
-        by = SCREEN_H // 2 + 65
+        by = SCREEN_H // 2 + 50
 
         self.btn_start = Button(
-            pygame.Rect(cx - 150, by, 300, 46),
+            pygame.Rect(cx - 150, by, 300, 44),
             "START SIMULATION", C_NEON_GOLD, 15,
         )
         self.btn_start.on_click(self.go_start)
 
         self.btn_setup = Button(
-            pygame.Rect(cx - 150, by + 56, 300, 42),
+            pygame.Rect(cx - 150, by + 52, 300, 40),
             "CUSTOM SETUP", C_NEON_CYAN, 14,
         )
         self.btn_setup.on_click(self.go_setup)
+
+        self.btn_booking = Button(
+            pygame.Rect(cx - 150, by + 100, 300, 40),
+            "RESERVE SEATS (BOOKING)", (100, 220, 140), 14,
+        )
+        self.btn_booking.on_click(self.go_booking)
 
 
     def handle_event(self, evt: pygame.event.Event) -> None:
         self.btn_start.handle_event(evt)
         self.btn_setup.handle_event(evt)
+        self.btn_booking.handle_event(evt)
         if evt.type == pygame.KEYDOWN:
             if evt.key in (pygame.K_RETURN, pygame.K_SPACE):
                 self.go_start()
@@ -79,18 +92,30 @@ class MainMenu:
         self._t += dt
         self.btn_start.update(dt)
         self.btn_setup.update(dt)
+        self.btn_booking.update(dt)
 
     def draw(self, surface: pygame.Surface) -> None:
         bg = AL.menu_background(self._t)
         surface.blit(bg, (0, 0))
 
-        ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-        ov.fill((0, 0, 0, 120))
-        surface.blit(ov, (0, 0))
+        frames = AL.menu_background_frames()
+        # Animated GIF has multiple frames; static fallback has exactly one
+        has_custom_bg = len(frames) > 1
 
-        for star in self._stars:
-            star.draw(surface, self._t)
-
+        if not has_custom_bg:
+            # Fallback starry night if no background asset is present
+            ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 120))
+            surface.blit(ov, (0, 0))
+            for star in self._stars:
+                star.draw(surface, self._t)
+        else:
+            # Soft glassmorphic backdrop behind the menu buttons
+            btn_rect = pygame.Rect(SCREEN_W // 2 - 170, SCREEN_H // 2 + 40, 340, 165)
+            btn_backdrop = pygame.Surface((btn_rect.width, btn_rect.height), pygame.SRCALPHA)
+            btn_backdrop.fill((8, 12, 22, 140))
+            surface.blit(btn_backdrop, btn_rect.topleft)
+            pygame.draw.rect(surface, (45, 58, 85), btn_rect, 1, border_radius=12)
 
         logo = AL.menu_title_logo()
         if logo:
@@ -110,5 +135,6 @@ class MainMenu:
 
         self.btn_start.draw(surface)
         self.btn_setup.draw(surface)
+        self.btn_booking.draw(surface)
 
 

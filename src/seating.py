@@ -1,26 +1,46 @@
-
 from typing import List, Tuple, Optional
+
+
+# =====================================================================
+# Step 1: Define the Theater Layout
+# • 2D list representing the seating chart (5 rows by 10 seats).
+# • 'A' = available, 'X' = taken.
+# =====================================================================
+seats = [['A' for _ in range(10)] for _ in range(5)]
 
 
 def create_seating_chart(rows: int = 5, cols: int = 10, default_state: str = 'A') -> List[List[str]]:
     return [[default_state for _ in range(cols)] for _ in range(rows)]
 
 
-def display_seating_chart(chart: List[List[str]]) -> None:
-    if not chart or not chart[0]:
+def copy_chart(chart: List[List[str]]) -> List[List[str]]:
+    return [row[:] for row in chart]
+
+
+def price_for_row(row: int, total_rows: int = 5) -> float:
+    """Front rows (closest to the screen) cost more than back rows."""
+    if row <= max(1, total_rows // 3):
+        return 250.0
+    if row >= total_rows:
+        return 120.0
+    return 180.0
+
+
+# =====================================================================
+# Step 2: Display the Seating Chart
+# • Prints column headers (1..10) and rows formatted as "Row N: ...".
+# =====================================================================
+def display_seats(seats: List[List[str]]) -> None:
+    if not seats or not seats[0]:
         print("Empty seating chart.")
         return
+    print("   " + " ".join(f"{i+1:>2}" for i in range(len(seats[0]))))
+    for i, row in enumerate(seats):
+        print(f"Row {i+1:<2}: " + "  ".join(row))
 
-    num_rows = len(chart)
-    num_cols = len(chart[0])
 
-    col_header = "       " + " ".join(f"{col:1d}" if col < 10 else f"{col:2d}" for col in range(1, num_cols + 1))
-    print("\n" + col_header)
-
-    for r_idx, row in enumerate(chart, start=1):
-        row_str = " ".join(f"{seat:1s}" for seat in row)
-        print(f"Row {r_idx:<2d} {row_str}")
-    print()
+# Alias for backwards compatibility across existing modules
+display_seating_chart = display_seats
 
 
 def is_valid_seat(chart: List[List[str]], row: int, col: int) -> bool:
@@ -35,7 +55,8 @@ def is_seat_available(chart: List[List[str]], row: int, col: int) -> bool:
     return chart[row - 1][col - 1] == 'A'
 
 
-def reserve_seat(chart: List[List[str]], row: int, col: int) -> Tuple[bool, str]:
+def reserve_seat_pos(chart: List[List[str]], row: int, col: int) -> Tuple[bool, str]:
+    """Internal programmatic seat reservation by 1-indexed row and col."""
     if not is_valid_seat(chart, row, col):
         num_rows = len(chart)
         num_cols = len(chart[0]) if chart else 0
@@ -49,6 +70,33 @@ def reserve_seat(chart: List[List[str]], row: int, col: int) -> Tuple[bool, str]
 
     chart[r_idx][c_idx] = 'X'
     return True, f"Success! Seat (Row {row}, Seat {col}) has been reserved."
+
+
+# =====================================================================
+# Step 3: Seat Reservation Function
+# • Interactive loop prompting user for row & seat numbers.
+# • Also supports programmatic calls: reserve_seat(seats, row, col).
+# =====================================================================
+def reserve_seat(seats: List[List[str]], row: Optional[int] = None, col: Optional[int] = None):
+    if row is not None and col is not None:
+        return reserve_seat_pos(seats, row, col)
+
+    num_rows = len(seats)
+    num_cols = len(seats[0]) if num_rows > 0 else 0
+    while True:
+        try:
+            row_in = int(input(f"Enter row (1-{num_rows}): ")) - 1
+            col_in = int(input(f"Enter seat (1-{num_cols}): ")) - 1
+            if row_in < 0 or col_in < 0:
+                raise IndexError
+            if seats[row_in][col_in] == 'A':
+                seats[row_in][col_in] = 'X'
+                print("Seat reserved successfully!")
+                break
+            else:
+                print("Sorry, that seat is already taken.")
+        except (IndexError, ValueError):
+            print("Invalid input. Try again.")
 
 
 def cancel_reservation(chart: List[List[str]], row: int, col: int) -> Tuple[bool, str]:
@@ -66,6 +114,21 @@ def get_available_seats_count(chart: List[List[str]]) -> int:
 
 def get_taken_seats_count(chart: List[List[str]]) -> int:
     return sum(row.count('X') for row in chart)
+
+
+# =====================================================================
+# Step 4: Loop the Booking System
+# • Allows multiple seat bookings using a menu loop.
+# =====================================================================
+def book_seats(seats_chart: Optional[List[List[str]]] = None) -> None:
+    global seats
+    target = seats if seats_chart is None else seats_chart
+    while True:
+        display_seats(target)
+        reserve_seat(target)
+        cont = input("Reserve another seat? (y/n): ").lower()
+        if cont != 'y':
+            break
 
 
 class TheaterSeating:
@@ -94,14 +157,26 @@ class TheaterSeating:
         return (self.reserved_seats / self.total_seats) * 100.0 if self.total_seats > 0 else 0.0
 
     def display(self) -> None:
-        display_seating_chart(self.chart)
+        display_seats(self.chart)
+
+    def available_positions(self) -> List[Tuple[int, int]]:
+        seats_avail: List[Tuple[int, int]] = []
+        for row_idx, row in enumerate(self.chart, start=1):
+            for col_idx, seat in enumerate(row, start=1):
+                if seat == 'A':
+                    seats_avail.append((row_idx, col_idx))
+        return seats_avail
+
+    def snapshot(self) -> List[List[str]]:
+        return copy_chart(self.chart)
 
     def reserve(self, row: int, col: int, customer_name: str = "Guest", price: Optional[float] = None) -> Tuple[bool, str]:
-        success, msg = reserve_seat(self.chart, row, col)
+        success, msg = reserve_seat_pos(self.chart, row, col)
         if success:
+            charged = price if price is not None else price_for_row(row, self.rows)
             self.seat_data[(row, col)] = {
                 "customer_name": customer_name,
-                "price": price if price is not None else self.default_price,
+                "price": charged,
             }
         return success, msg
 
@@ -116,7 +191,23 @@ class TheaterSeating:
         self.seat_data.clear()
 
 
-def run_seating_cli() -> None:
-    pass
+def _read_int(prompt: str) -> Optional[int]:
+    raw = input(prompt).strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
+def run_seating_cli(seating_obj: Optional[TheaterSeating] = None) -> None:
+    target_chart = seating_obj.chart if seating_obj is not None else seats
+    print("\n" + "=" * 55)
+    print(" CAMARINES NORTE STATE COLLEGE - THEATER SEAT BOOKING")
+    print("=" * 55)
+    book_seats(target_chart)
+    print("\nFinal Seating Chart:")
+    display_seats(target_chart)
+
+
+if __name__ == "__main__":
+    book_seats(seats)

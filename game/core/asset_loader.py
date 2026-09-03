@@ -491,28 +491,24 @@ def player_sprite(frame=0, direction=0):
         fw = sheet.get_width() // 4
         fh = sheet.get_height() // 4
 
-        if direction == 0:
-            row = 0
-            flip_x = False
-        elif direction == 1:
-            row = 1
-            flip_x = False
-        elif direction == 2:
-            row = 1
-            flip_x = True
-        elif direction == 3:
-            row = 3
-            flip_x = False
+        # Spritesheet rows: 0=face-front(down), 1=left, 2=right, 3=face-back(up)
+        if direction == 0:   # DIR_DOWN
+            row = 0;  flip_x = False
+        elif direction == 1: # DIR_LEFT
+            row = 1;  flip_x = False
+        elif direction == 2: # DIR_RIGHT
+            row = 2;  flip_x = False
+        elif direction == 3: # DIR_UP
+            row = 3;  flip_x = False
         else:
-            row = 0
-            flip_x = False
+            row = 0;  flip_x = False
 
         s = _make(fw, fh)
         s.blit(sheet, (0, 0), (frame * fw, row * fh, fw, fh))
         if flip_x:
             s = pygame.transform.flip(s, True, False)
 
-        target_w = 48
+        target_w = 64
         target_h = int(target_w * (fh / fw))
         s = pygame.transform.smoothscale(s, (target_w, target_h))
     else:
@@ -715,9 +711,10 @@ def menu_background_frames():
     if c:
         return c
     path_gif = os.path.join(BG_DIR, "main_menu.gif")
-    path_jpg = os.path.join(BG_DIR, "main_menu.jpg")
     frames = []
-    if os.path.exists(path_gif):
+
+    # 1. Try pygame-ce built-in animation loader if available
+    if os.path.exists(path_gif) and hasattr(pygame.image, "load_animation"):
         try:
             anim = pygame.image.load_animation(path_gif)
             for surf, dur in anim:
@@ -726,15 +723,54 @@ def menu_background_frames():
                     s = pygame.transform.scale(s, (SCREEN_W, SCREEN_H))
                 frames.append((s, dur / 1000.0 if dur > 0 else 0.17))
         except Exception:
+            frames = []
+
+    # 2. Try loading multi-frame animated GIF via PIL (Pillow)
+    if not frames and os.path.exists(path_gif):
+        try:
+            from PIL import Image, ImageSequence
+            pil_img = Image.open(path_gif)
+            for frame in ImageSequence.Iterator(pil_img):
+                rgba = frame.convert("RGBA")
+                raw = rgba.tobytes()
+                s = pygame.image.fromstring(raw, rgba.size, "RGBA").convert()
+                if s.get_size() != (SCREEN_W, SCREEN_H):
+                    s = pygame.transform.scale(s, (SCREEN_W, SCREEN_H))
+                dur = frame.info.get("duration", 170)
+                frames.append((s, (dur / 1000.0) if dur > 0 else 0.17))
+        except Exception:
+            frames = []
+
+    # 3. Fallback to single static frame from GIF
+    if not frames and os.path.exists(path_gif):
+        try:
+            img = pygame.image.load(path_gif).convert()
+            if img.get_size() != (SCREEN_W, SCREEN_H):
+                img = pygame.transform.scale(img, (SCREEN_W, SCREEN_H))
+            frames.append((img, 1.0))
+        except Exception:
             pass
-    if not frames and os.path.exists(path_jpg):
-        img = pygame.image.load(path_jpg).convert()
-        img = pygame.transform.scale(img, (SCREEN_W, SCREEN_H))
-        frames.append((img, 1.0))
+
+    # 4. Fallback to alternative static images in BG_DIR
+    if not frames:
+        for fname in ("main_menu.jpg", "main_menu.png", "outside cinema.png"):
+            p = os.path.join(BG_DIR, fname)
+            if os.path.exists(p):
+                try:
+                    img = pygame.image.load(p).convert()
+                    if img.get_size() != (SCREEN_W, SCREEN_H):
+                        img = pygame.transform.scale(img, (SCREEN_W, SCREEN_H))
+                    frames.append((img, 1.0))
+                    break
+                except Exception:
+                    pass
+
+    # 5. Fallback dark surface if no image files exist
     if not frames:
         s = pygame.Surface((SCREEN_W, SCREEN_H))
         s.fill(C_BG_DARK)
         frames.append((s, 1.0))
+
     return _put("menu_bg_frames", frames)
 
 

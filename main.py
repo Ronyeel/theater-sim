@@ -90,6 +90,11 @@ def run_simulation(
 
 
 def main() -> None:
+    if any(arg in sys.argv for arg in ("--seats", "-s", "--cli", "--book")):
+        from src.seating import run_seating_cli
+        run_seating_cli()
+        return
+
     from game.__main__ import main as run_game
     run_game()
 

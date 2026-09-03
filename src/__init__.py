@@ -1,4 +1,3 @@
-
 from src.theater import Theater, MovieTheater
 from src.simulation import (
     go_to_movies,
@@ -13,14 +12,20 @@ from src.stats import (
     format_minutes_seconds,
 )
 from src.seating import (
+    seats,
     create_seating_chart,
+    copy_chart,
+    display_seats,
     display_seating_chart,
     reserve_seat,
+    reserve_seat_pos,
     cancel_reservation,
     is_valid_seat,
     is_seat_available,
     get_available_seats_count,
     get_taken_seats_count,
+    price_for_row,
+    book_seats,
     TheaterSeating,
     run_seating_cli,
 )
@@ -31,14 +36,20 @@ __all__ = [
     "run_theater",
     "get_average_wait_time",
     "calculate_wait_time",
+    "seats",
     "create_seating_chart",
+    "copy_chart",
+    "display_seats",
     "display_seating_chart",
+    "price_for_row",
     "reserve_seat",
+    "reserve_seat_pos",
     "cancel_reservation",
     "is_valid_seat",
     "is_seat_available",
     "get_available_seats_count",
     "get_taken_seats_count",
+    "book_seats",
     "TheaterSeating",
     "run_seating_cli",
     "MovieTheater",
@@ -47,4 +58,3 @@ __all__ = [
     "average_wait",
     "format_minutes_seconds",
 ]
-

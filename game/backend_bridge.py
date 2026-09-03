@@ -6,6 +6,7 @@ import simpy
 from src.theater import Theater
 from src.simulation import generate_moviegoers
 from src.stats import average_wait
+from src.seating import TheaterSeating
 
 
 class SimulationStats:
@@ -23,7 +24,8 @@ class SimulationStats:
         self.goal_completion_rate: float = 0.0
         self.cashiers_busy: int = 0
         self.ushers_busy: int = 0
-        self.servers_busy: int = 0
+        self.seats_reserved: int = 0
+        self.seats_available: int = 0
 
 
 class TheaterSimulationBridge:
@@ -57,6 +59,8 @@ class TheaterSimulationBridge:
         self._arrival_count = [0]
         self.env: simpy.Environment = simpy.Environment()
         self.theater: Theater = Theater(self.env, self.num_cashiers, self.num_servers, self.num_ushers)
+        self.seating = TheaterSeating(5, 10)
+        self.final_chart = self.seating.snapshot()
 
         self.reset()
 
@@ -84,6 +88,8 @@ class TheaterSimulationBridge:
         self.stats = SimulationStats()
         self.is_running = True
         self.is_paused = False
+        self.seating.reset()
+        self.final_chart = self.seating.snapshot()
 
     def pause(self) -> None:
         self.is_paused = True
@@ -145,6 +151,10 @@ class TheaterSimulationBridge:
         self.stats.cashiers_busy = self.theater.cashier.count
         self.stats.ushers_busy = self.theater.usher.count
         self.stats.servers_busy = self.theater.server.count
+        self.stats.seats_reserved = self.seating.reserved_seats
+        self.stats.seats_available = self.seating.available_seats
 
         if self.env.now >= self.runtime:
+            if self.is_running:
+                self.final_chart = self.seating.snapshot()
             self.is_running = False

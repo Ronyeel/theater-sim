@@ -11,6 +11,7 @@ from game.settings import (
 )
 
 from game.core.tilemap import is_walkable, tile_at
+from game.world.seat_chart import chart_to_tile
 
 _FRAME_W = 18
 _FRAME_H = 26
@@ -287,6 +288,8 @@ class NPC:
         self.prefers_company = random.random() < 0.42
         self._seat_tiebreaker = random.uniform(0.0, 1.4)
         self.seat = seat
+        self.seating = None
+        self._chart_seat: tuple[int, int] | None = None
         self.spawn_delay = max(0.0, spawn_delay)
 
         self.x = float(start_col * TILE_SIZE + TILE_SIZE // 2)
@@ -744,7 +747,7 @@ class NPC:
                 self.direction = _DIR_UP
                 self._frame = 0
             else:
-                self.seat = None
+                self._release_chart_seat()
                 replacement = self._claim_available_seat(nearby_npcs)
                 if replacement is not None:
                     self._set_route([replacement])
@@ -798,7 +801,16 @@ class NPC:
             self._set_route([target])
 
 
+    def _release_chart_seat(self) -> None:
+        if self._chart_seat is not None and self.seating is not None:
+            self.seating.cancel(self._chart_seat[0], self._chart_seat[1])
+        self._chart_seat = None
+        self.seat = None
+
     def _claim_available_seat(self, nearby_npcs: list["NPC"] | None) -> tuple[int, int] | None:
+        if self.seating is not None:
+            return self._claim_from_chart(nearby_npcs)
+
         claimed = {
             other.seat
             for other in nearby_npcs or []
@@ -822,30 +834,54 @@ class NPC:
                 other.seat for other in nearby_npcs or []
                 if other is not self and not other.has_left and other.seat is not None
             ]
-
-            def seat_score(seat: tuple[int, int]) -> float:
-                col, row = seat
-                score = abs(row - self.preferred_row) * 28
-                on_preferred_side = (col < 10) == (self.preferred_side < 0)
-                score += 0 if on_preferred_side else 16
-
-                if occupied:
-                    distances = [abs(col - other_col) + abs(row - other_row)
-                                 for other_col, other_row in occupied]
-                    nearest = min(distances)
-                    if nearest == 1:
-                        score += 38
-                    elif self.prefers_company:
-                        score += abs(nearest - 2) * 7
-                    else:
-                        score += max(0, 4 - nearest) * 9
-
-                score += ((col * 7 + row * 11 + self.character_id * 5)
-                          % 9) * self._seat_tiebreaker
-                return score
-
-            self.seat = min(available, key=seat_score)
+            self.seat = min(available, key=lambda seat: self._seat_score(seat, occupied))
         return self.seat
+
+    def _claim_from_chart(self, nearby_npcs: list["NPC"] | None) -> tuple[int, int] | None:
+        if self._chart_seat is not None:
+            return self.seat
+
+        positions = self.seating.available_positions()
+        if not positions:
+            self.seat = None
+            return None
+
+        occupied = [
+            other.seat for other in nearby_npcs or []
+            if other is not self and not other.has_left and other.seat is not None
+        ]
+        best_row, best_col = min(
+            positions,
+            key=lambda pos: self._seat_score(chart_to_tile(*pos), occupied),
+        )
+        success, _ = self.seating.reserve(best_row, best_col, customer_name=self.name)
+        if not success:
+            self.seat = None
+            return None
+        self._chart_seat = (best_row, best_col)
+        self.seat = chart_to_tile(best_row, best_col)
+        return self.seat
+
+    def _seat_score(self, seat: tuple[int, int], occupied: list) -> float:
+        col, row = seat
+        score = abs(row - self.preferred_row) * 28
+        on_preferred_side = (col < 10) == (self.preferred_side < 0)
+        score += 0 if on_preferred_side else 16
+
+        if occupied:
+            distances = [abs(col - other_col) + abs(row - other_row)
+                         for other_col, other_row in occupied]
+            nearest = min(distances)
+            if nearest == 1:
+                score += 38
+            elif self.prefers_company:
+                score += abs(nearest - 2) * 7
+            else:
+                score += max(0, 4 - nearest) * 9
+
+        score += ((col * 7 + row * 11 + self.character_id * 5)
+                  % 9) * self._seat_tiebreaker
+        return score
 
     def _seat_is_clear(self, seat: tuple[int, int] | None,
                        nearby_npcs: list["NPC"] | None) -> bool:
@@ -903,6 +939,7 @@ class NPC:
     def _start_exit_route(self, movie_finished: bool = False):
         if self.state in {self.LEAVING, self.LEFT}:
             return
+        self._release_chart_seat()
         if movie_finished:
             self._speech_text = "Movie's over!"
             self._speech_timer = 2.5
@@ -1059,8 +1096,8 @@ class NPC:
                 self._set_state(self.LEFT)
                 self.has_left = True
                 return
-            if self.seat is not None and (cur_col, cur_row) != self.seat:
-                self.seat = None
+            if self._chart_seat is not None and (cur_col, cur_row) != self.seat:
+                self._release_chart_seat()
 
         self._anim_t += dt
         self._detour_cooldown = max(0.0, self._detour_cooldown - dt)

@@ -138,7 +138,7 @@ class Player:
             col = int(px) // TILE_SIZE
             row = int(py) // TILE_SIZE
             if (row == AUDITORIUM_DOOR_ROW and col in AUDITORIUM_DOOR_COLS
-                    and not self.has_ticket):
+                    and not self.ticket_checked):
                 self.ticket_gate_blocked = True
                 return False
             if (row == USHER_DESK_ROW and col in USHER_GATE_COLS

@@ -12,11 +12,12 @@ from game.settings import (
 )
 from game.backend_bridge import TheaterSimulationBridge
 from game.screens import (
-    MainMenu, SetupScreen, GameScreen, ResultsScreen
+    MainMenu, SetupScreen, BookingScreen, GameScreen, ResultsScreen
 )
 
 STATE_TITLE   = "title"
 STATE_SETUP   = "setup"
+STATE_BOOKING = "booking"
 STATE_GAME    = "game"
 STATE_RESULTS = "results"
 
@@ -43,8 +44,14 @@ class App:
         self._screens[STATE_TITLE] = MainMenu(
             go_start=self._switch(STATE_GAME),
             go_setup=self._switch(STATE_SETUP),
+            go_booking=self._switch(STATE_BOOKING),
         )
         self._screens[STATE_SETUP] = SetupScreen(
+            bridge=self.bridge,
+            go_game=self._switch(STATE_GAME),
+            go_back=self._switch(STATE_TITLE),
+        )
+        self._screens[STATE_BOOKING] = BookingScreen(
             bridge=self.bridge,
             go_game=self._switch(STATE_GAME),
             go_back=self._switch(STATE_TITLE),
@@ -70,6 +77,12 @@ class App:
                     go_results=self._switch(STATE_RESULTS),
                     bridge=self.bridge,
                 )
+            elif target_state == STATE_BOOKING:
+                self._screens[STATE_BOOKING] = BookingScreen(
+                    bridge=self.bridge,
+                    go_game=self._switch(STATE_GAME),
+                    go_back=self._switch(STATE_TITLE),
+                )
             elif target_state == STATE_RESULTS:
                 self._screens[STATE_RESULTS] = ResultsScreen(
                     bridge=self.bridge,
@@ -79,6 +92,11 @@ class App:
                     quit_game=self.quit,
                 )
             self._current_state = target_state
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                if target_state in (STATE_TITLE, STATE_SETUP, STATE_BOOKING, STATE_RESULTS):
+                    pygame.mixer.music.set_volume(1.0)
+                elif target_state == STATE_GAME:
+                    pygame.mixer.music.set_volume(0.4)
         return transition
 
 
@@ -91,7 +109,7 @@ class App:
             if self._current_state == STATE_TITLE:
                 self.quit()
                 return
-            elif self._current_state in (STATE_SETUP, STATE_RESULTS):
+            elif self._current_state in (STATE_SETUP, STATE_BOOKING, STATE_RESULTS):
                 self._current_state = STATE_TITLE
                 return
         self.current.handle_event(evt)
@@ -110,8 +128,15 @@ class App:
 def main() -> None:
     if RANDOM_SEED is not None:
         random.seed(RANDOM_SEED)
+    pygame.mixer.pre_init(44100, -16, 2, 2048)
     pygame.init()
     pygame.display.set_caption(GAME_TITLE)
+
+    bgm_path = os.path.join(os.path.dirname(__file__), "assets", "music", "theater_bgm.mp3")
+    if os.path.exists(bgm_path) and pygame.mixer.get_init():
+        pygame.mixer.music.load(bgm_path)
+        pygame.mixer.music.set_volume(1.0)
+        pygame.mixer.music.play(-1)
 
     _icon_path = os.path.join(UI_DIR, "game_icon.png")
     if os.path.exists(_icon_path):
