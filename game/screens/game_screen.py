@@ -346,6 +346,24 @@ class GameScreen:
             for npc in self.npcs:
                 npc.set_service_capacity(self._num_cashiers, self._num_ushers, self._num_servers)
 
+            # Rebalance NPCs still waiting in the ticket line across newly open cashiers.
+            # Sort by queue sequence so earlier arrivals keep priority.
+            waiting = [
+                npc for npc in self.npcs
+                if not npc.has_left and npc.state == npc.TICKET_LINE
+            ]
+            waiting.sort(key=lambda n: n.ticket_seq)
+            lane_counts = [0] * self._num_cashiers
+            for npc in waiting:
+                # Pick the lane with the fewest people so far in this rebalance pass
+                best_lane = min(range(self._num_cashiers), key=lambda l: lane_counts[l])
+                npc.ticket_lane = best_lane
+                npc.ticket_line_depth = lane_counts[best_lane]
+                npc.usher_lane = 0 if best_lane < 2 else 1
+                lane_counts[best_lane] += 1
+                # Re-route to the correct wait position for the new lane
+                npc._set_route([npc._ticket_wait_tile()])
+
             self.hud.add_log(
                 f"Live staffing updated: {self._num_cashiers}C | {self._num_ushers}U | {self._num_servers}S",
                 C_NEON_CYAN,
