@@ -9,6 +9,7 @@ from game.settings import (
 )
 from game.core import asset_loader as AL
 from game.core.tilemap import is_walkable
+from game.entities.npc import _tile_path
 
 
 class Stage:
@@ -132,10 +133,18 @@ class Player:
         self.stage = Stage.NEED_EXIT
         self.is_auto_exiting = True
         self.auto_exit_complete = False
+        current_tile = (self.tile_col, self.tile_row)
+        route_tiles = []
+        for waypoint in waypoints:
+            segment = _tile_path(current_tile, waypoint)
+            if not segment:
+                continue
+            route_tiles.extend(segment[1:] if route_tiles else segment)
+            current_tile = waypoint
         self._auto_exit_route = [
             (col * TILE_SIZE + TILE_SIZE // 2,
              row * TILE_SIZE + TILE_SIZE // 2)
-            for col, row in waypoints
+            for col, row in route_tiles
         ]
         self._vx = 0.0
         self._vy = 0.0
@@ -164,11 +173,11 @@ class Player:
             col = int(px) // TILE_SIZE
             row = int(py) // TILE_SIZE
             if (row == AUDITORIUM_DOOR_ROW and col in AUDITORIUM_DOOR_COLS
-                    and not self.ticket_checked):
+                    and not self.ticket_checked and not self.is_auto_exiting):
                 self.ticket_gate_blocked = True
                 return False
             if (row == USHER_DESK_ROW and col in USHER_GATE_COLS
-                    and not self.ticket_checked):
+                    and not self.ticket_checked and not self.is_auto_exiting):
                 self.usher_gate_blocked = True
                 return False
             return is_walkable(col, row)
