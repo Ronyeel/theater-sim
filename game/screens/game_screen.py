@@ -11,7 +11,7 @@ from game.settings import (
     USHER_DESK_COLS, USHER_DESK_ROW,
     SNACK_DESK_COLS, SNACK_DESK_ROW,
     MAP_COLS, MAP_ROWS, TILE_DESK, TILE_SEAT, TILE_SNACK, TILE_USHER,
-    TILE_SECURITY, PLAYER_SPAWN,
+    TILE_SECURITY, PLAYER_SPAWN, EXIT_DOOR_COLS, EXIT_DOOR_ROW,
     C_DIALOG_BG_TOP, C_DIALOG_BG_BOT, C_DIALOG_BORDER_OUT,
     C_DIALOG_BORDER_IN, C_DIALOG_ORNAMENT,
 )
@@ -459,7 +459,7 @@ class GameScreen:
         if self._player_mode:
             # Player mode: WASD drives the controlled player; camera follows
             self.controlled_player.handle_keys(keys)
-            self.controlled_player.update(dt)
+            self.controlled_player.update(dt, self.npcs)
 
             if self.controlled_player.usher_gate_blocked and not self.controlled_player.ticket_checked:
                 if not self.controlled_player.has_ticket:
@@ -477,6 +477,8 @@ class GameScreen:
             self.camera._clamp_bounds()
         else:
             # Spectator mode: arrow/WASD pans the free camera
+            if self.controlled_player.is_auto_exiting:
+                self.controlled_player.update(dt, self.npcs)
             pdx = (1 if keys[pygame.K_d] or keys[pygame.K_RIGHT] else 0) - (1 if keys[pygame.K_a] or keys[pygame.K_LEFT] else 0)
             pdy = (1 if keys[pygame.K_s] or keys[pygame.K_DOWN] else 0) - (1 if keys[pygame.K_w] or keys[pygame.K_UP] else 0)
             if pdx != 0 or pdy != 0:
@@ -506,10 +508,16 @@ class GameScreen:
                 if not self._finish_notified:
                     self._movie_finished = True
                     self._finish_notified = True
+                    if not self.controlled_player.is_auto_exiting:
+                        self._player_leave_theater()
                     self.hud.add_log("SIMULATION FINISHED! Generating report card...", C_NEON_GOLD)
 
                 self._finish_timer += dt
-                if self._finish_timer >= 2.0:
+                player_exit_done = (
+                    not self.controlled_player.is_auto_exiting
+                    and self.controlled_player.auto_exit_complete
+                )
+                if self._finish_timer >= 2.0 and player_exit_done:
                     self.go_results()
                     return
 
@@ -537,13 +545,27 @@ class GameScreen:
         self._player_set_msg(f"Ticket Purchased (₱250)! Reserved Row {row} Seat {col}. Proceed to Usher gate.", C_NEON_GOLD, "cashier")
         self.hud.add_log(f"[Box Office] Ticket purchased! Reserved Row {row}, Seat {col}.", C_NEON_GOLD)
 
+    def _player_leave_theater(self):
+        player = self.controlled_player
+        if player.seated_at_pos is not None:
+            row, col = player.seated_at_pos
+            self.simulation.seating.cancel(row, col)
+            player.seated_at_pos = None
+        exit_col = sum(EXIT_DOOR_COLS) // len(EXIT_DOOR_COLS)
+        player.start_auto_exit(exit_col, EXIT_DOOR_ROW)
+        self.hud.add_log("[Player] Movie finished. Heading to the exit.", C_NEON_GOLD)
+
     def _player_set_msg(self, msg: str, color=None, zone: str = "system"):
         self._rpg_bar.show(msg, color or C_TEXT_WHITE, zone)
 
     def _player_interact(self):
         p = self.controlled_player
         seating = self.simulation.seating
-        zone = find_nearest_zone(self.zones, p.x, p.y)
+        available_zones = [
+            zone for zone in self.zones
+            if not (zone.name == "seat" and p.stage in ("seated", "need_exit"))
+        ]
+        zone = find_nearest_zone(available_zones, p.x, p.y)
 
         if zone is None:
             self._player_set_msg("Nothing nearby to interact with.", C_TEXT_DIM, "system")
@@ -858,7 +880,12 @@ class GameScreen:
             self.controlled_player.draw(world, self.camera)
 
         if self._player_mode:
-            zone = find_nearest_zone(self.zones, self.controlled_player.x, self.controlled_player.y)
+            p = self.controlled_player
+            available_zones = [
+                zone for zone in self.zones
+                if not (zone.name == "seat" and p.stage in ("seated", "need_exit"))
+            ]
+            zone = find_nearest_zone(available_zones, p.x, p.y)
             if zone:
                 zsx, zsy = self.camera.world_to_screen(zone.x, zone.y)
 
@@ -883,7 +910,7 @@ class GameScreen:
                 key_f   = _font("consolas", 9,  bold=True)
 
                 lbl_surf = lbl_f.render(f"{icon}  {zone_lbl}", True, (255, 230, 120))
-                key_surf = key_f.render("[E]", True, (20, 14, 40))
+                key_surf = key_f.render("[SPACE]", True, (20, 14, 40))
 
                 pad_x, pad_y = 8, 4
                 key_badge_w = key_surf.get_width() + 8
@@ -909,7 +936,7 @@ class GameScreen:
                 cy = pill_y + (total_h - lbl_surf.get_height()) // 2
                 world.blit(lbl_surf, (pill_x + pad_x, cy))
 
-                # [E] key chip
+                # [SPACE] key chip
                 kx = pill_x + total_w - pad_x - key_badge_w
                 ky = pill_y + (total_h - key_badge_h) // 2
                 key_chip = pygame.Surface((key_badge_w, key_badge_h), pygame.SRCALPHA)

@@ -73,17 +73,9 @@ class MainMenu:
         )
         self.btn_setup.on_click(self.go_setup)
 
-        self.btn_booking = Button(
-            pygame.Rect(cx - 150, by + 100, 300, 40),
-            "RESERVE SEATS (BOOKING)", (100, 220, 140), 14,
-        )
-        self.btn_booking.on_click(self.go_booking)
-
-
     def handle_event(self, evt: pygame.event.Event) -> None:
         self.btn_start.handle_event(evt)
         self.btn_setup.handle_event(evt)
-        self.btn_booking.handle_event(evt)
         if evt.type == pygame.KEYDOWN:
             if evt.key in (pygame.K_RETURN, pygame.K_SPACE):
                 self.go_start()
@@ -92,7 +84,6 @@ class MainMenu:
         self._t += dt
         self.btn_start.update(dt)
         self.btn_setup.update(dt)
-        self.btn_booking.update(dt)
 
     def draw(self, surface: pygame.Surface) -> None:
         bg = AL.menu_background(self._t)
@@ -111,7 +102,7 @@ class MainMenu:
                 star.draw(surface, self._t)
         else:
             # Soft glassmorphic backdrop behind the menu buttons
-            btn_rect = pygame.Rect(SCREEN_W // 2 - 170, SCREEN_H // 2 + 40, 340, 165)
+            btn_rect = pygame.Rect(SCREEN_W // 2 - 170, SCREEN_H // 2 + 40, 340, 115)
             btn_backdrop = pygame.Surface((btn_rect.width, btn_rect.height), pygame.SRCALPHA)
             btn_backdrop.fill((8, 12, 22, 140))
             surface.blit(btn_backdrop, btn_rect.topleft)
@@ -135,6 +126,5 @@ class MainMenu:
 
         self.btn_start.draw(surface)
         self.btn_setup.draw(surface)
-        self.btn_booking.draw(surface)
 
 

@@ -52,8 +52,13 @@ class SeatingChartPanel:
             pygame.Rect(self.panel.x + 158, self.panel.bottom - 44, 132, 30),
             "CANCEL", C_NEON_RED, 12,
         )
+        self.close_btn = Button(
+            pygame.Rect(self.panel.right - 76, self.panel.y + 10, 62, 24),
+            "CLOSE", C_NEON_RED, 10,
+        )
         self.reserve_btn.on_click(self._reserve_typed)
         self.cancel_btn.on_click(self._cancel_typed)
+        self.close_btn.on_click(self.close)
         self.on_reserve_callback = None
 
     def bind(self, seating: TheaterSeating) -> None:
@@ -139,6 +144,7 @@ class SeatingChartPanel:
                     return True
         self.row_input.handle_event(event)
         self.seat_input.handle_event(event)
+        self.close_btn.handle_event(event)
         self.reserve_btn.handle_event(event)
         self.cancel_btn.handle_event(event)
         return True
@@ -146,6 +152,7 @@ class SeatingChartPanel:
     def update(self, dt: float) -> None:
         if not self.visible:
             return
+        self.close_btn.update(dt)
         self.reserve_btn.update(dt)
         self.cancel_btn.update(dt)
 
@@ -159,8 +166,7 @@ class SeatingChartPanel:
         stats = f"{self.seating.available_seats} open  •  {self.seating.reserved_seats} taken"
         draw_text(surface, stats, self._small_font, C_TEXT_DIM,
                   (self.panel.x + 14, self.panel.y + 30))
-        draw_text(surface, "[F2] Close", self._small_font, C_TEXT_DIM,
-                  (self.panel.right - 88, self.panel.y + 12))
+        self.close_btn.draw(surface)
 
         ox, oy = self.grid_origin
         for col in range(1, self.seating.cols + 1):

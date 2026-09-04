@@ -66,6 +66,9 @@ class Player:
         self.ticket_gate_blocked = False
         self.usher_gate_blocked = False
         self.usher_no_ticket_notified = False
+        self._auto_exit_route = []
+        self.is_auto_exiting = False
+        self.auto_exit_complete = False
 
 
     @property
@@ -87,8 +90,9 @@ class Player:
 
 
     def handle_keys(self, keys):
-        if self._interacting:
+        if self._interacting or self.stage == Stage.SEATED or self.is_auto_exiting:
             self._vx = 0.0; self._vy = 0.0
+            self._moving = False
             return
         dx = dy = 0
         if keys[pygame.K_w] or keys[pygame.K_UP]:    dy = -1
@@ -116,8 +120,30 @@ class Player:
         self._flash_color = color
         self._flash_timer = duration
 
+    def start_auto_exit(self, exit_col: int, exit_row: int):
+        door_col = 9 if self.tile_col < 10 else 10
+        current_row = self.tile_row
+        if current_row <= 7:
+            waypoints = [(door_col, 7), (door_col, 15), (door_col, 22), (exit_col, exit_row)]
+        elif current_row <= 14:
+            waypoints = [(door_col, 15), (door_col, 22), (exit_col, exit_row)]
+        else:
+            waypoints = [(door_col, 22), (exit_col, exit_row)]
+        self.stage = Stage.NEED_EXIT
+        self.is_auto_exiting = True
+        self.auto_exit_complete = False
+        self._auto_exit_route = [
+            (col * TILE_SIZE + TILE_SIZE // 2,
+             row * TILE_SIZE + TILE_SIZE // 2)
+            for col, row in waypoints
+        ]
+        self._vx = 0.0
+        self._vy = 0.0
+        self._anim_timer = 0.0
+        self._anim_frame = 0
 
-    def update(self, dt: float):
+
+    def update(self, dt: float, nearby_npcs=None):
         if self._interacting:
             self._interact_t -= dt
             if self._interact_t <= 0:
@@ -147,6 +173,34 @@ class Player:
                 return False
             return is_walkable(col, row)
 
+        if self._auto_exit_route:
+            target_x, target_y = self._auto_exit_route[0]
+            dx = target_x - self.x
+            dy = target_y - self.y
+            distance = math.hypot(dx, dy)
+            if distance < 3:
+                self.x, self.y = target_x, target_y
+                self._auto_exit_route.pop(0)
+                if not self._auto_exit_route:
+                    self.is_auto_exiting = False
+                    self.auto_exit_complete = True
+                    self._vx = 0.0
+                    self._vy = 0.0
+                    self._moving = False
+                    return
+                target_x, target_y = self._auto_exit_route[0]
+                dx = target_x - self.x
+                dy = target_y - self.y
+                distance = math.hypot(dx, dy)
+            if distance > 0:
+                self._vx = dx / distance * PLAYER_SPEED
+                self._vy = dy / distance * PLAYER_SPEED
+                self._moving = True
+                if abs(dx) > abs(dy):
+                    self._direction = DIR_RIGHT if dx > 0 else DIR_LEFT
+                else:
+                    self._direction = DIR_DOWN if dy > 0 else DIR_UP
+
         def foot_box_passable(cx, cy):
             return all(passable(px, py) for px, py in (
                 (cx - hw + 2, cy - hh + 2),
@@ -163,7 +217,7 @@ class Player:
         self._idle_t += dt
         self._idle_bob = math.sin(self._idle_t * 2.5) * 1.5
 
-        if self._moving:
+        if self._moving or self.is_auto_exiting:
             self._anim_timer += dt
             if self._anim_timer >= 0.14:
                 self._anim_timer = 0

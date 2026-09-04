@@ -35,6 +35,7 @@ class ResultsScreen:
         self.go_title = go_title
         self.quit_game = quit_game
         self._t = 0.0
+        self._page = 0
 
         self._title_f = _font(20, bold=True)
         self._val_f = _font(22, bold=True)
@@ -138,6 +139,13 @@ class ResultsScreen:
         return recs
 
     def handle_event(self, evt: pygame.event.Event) -> None:
+        if evt.type == pygame.KEYDOWN:
+            if evt.key in (pygame.K_RIGHT, pygame.K_PAGEDOWN):
+                self._page = min(1, self._page + 1)
+                return
+            if evt.key in (pygame.K_LEFT, pygame.K_PAGEUP):
+                self._page = max(0, self._page - 1)
+                return
         for b in (self.btn_again, self.btn_setup, self.btn_title, self.btn_quit):
             b.handle_event(evt)
 
@@ -282,12 +290,97 @@ class ResultsScreen:
             surf = self._body_f.render(ln, True, (194, 210, 230))
             surface.blit(surf, (rect.x + 14, rect.y + 32 + i * 16))
 
+    def _draw_final_seating(self, surface: pygame.Surface) -> None:
+        hx, hy = 28, 18
+        title_surf = self._title_f.render("Final Reserved Seat Layout", True, (248, 250, 252))
+        surface.blit(title_surf, (hx, hy))
+        page_label = self._mono_f.render("PAGE 2 / 2", True, (120, 140, 170))
+        surface.blit(page_label, (SCREEN_W - 28 - page_label.get_width(), hy + 5))
+        pygame.draw.line(
+            surface, (30, 38, 60),
+            (hx, hy + title_surf.get_height() + 8),
+            (SCREEN_W - hx, hy + title_surf.get_height() + 8),
+            1,
+        )
+
+        seating = self.bridge.seating
+        panel = pygame.Rect(62, 100, SCREEN_W - 124, 438)
+        pygame.draw.rect(surface, (14, 18, 30), panel, border_radius=8)
+        pygame.draw.rect(surface, (28, 36, 56), panel, 1, border_radius=8)
+
+        screen_label = self._sec_f.render("SCREEN 1", True, C_NEON_CYAN)
+        surface.blit(screen_label, (panel.centerx - screen_label.get_width() // 2, panel.y + 18))
+        pygame.draw.line(
+            surface, C_NEON_CYAN,
+            (panel.x + 260, panel.y + 42),
+            (panel.right - 260, panel.y + 42),
+            2,
+        )
+
+        seat_w, seat_h, gap = 68, 54, 10
+        grid_w = seating.cols * seat_w + (seating.cols - 1) * gap
+        grid_x = panel.centerx - grid_w // 2
+        grid_y = panel.y + 74
+        row_font = self._mono_f
+        seat_font = self._mono_f
+
+        for row in range(1, seating.rows + 1):
+            row_label = row_font.render(f"R{row}", True, (148, 163, 184))
+            surface.blit(row_label, (grid_x - row_label.get_width() - 12,
+                                     grid_y + (row - 1) * (seat_h + gap) + 18))
+            for col in range(1, seating.cols + 1):
+                x = grid_x + (col - 1) * (seat_w + gap)
+                y = grid_y + (row - 1) * (seat_h + gap)
+                reserved = seating.chart[row - 1][col - 1] == "X"
+                color = C_NEON_GOLD if reserved else (52, 110, 78)
+                fill = (64, 42, 20) if reserved else (22, 55, 42)
+                rect = pygame.Rect(x, y, seat_w, seat_h)
+                pygame.draw.rect(surface, fill, rect, border_radius=5)
+                pygame.draw.rect(surface, color, rect, 1, border_radius=5)
+
+                seat_label = seat_font.render(f"S{col}", True, (190, 205, 220))
+                surface.blit(seat_label, (x + 6, y + 5))
+                info = seating.seat_data.get((row, col), {})
+                if reserved:
+                    customer = info.get("customer_name", "Reserved")
+                    if customer in ("Player", "Student / Player"):
+                        customer = "PLAYER"
+                    elif len(customer) > 9:
+                        customer = customer[:8] + "."
+                    occupant = seat_font.render(customer, True, color)
+                    surface.blit(occupant, (x + 6, y + 30))
+                else:
+                    available = seat_font.render("OPEN", True, (120, 210, 155))
+                    surface.blit(available, (x + 6, y + 30))
+
+        reserved_count = sum(
+            1 for row in seating.chart for value in row if value == "X"
+        )
+        legend_y = panel.bottom - 34
+        pygame.draw.rect(surface, C_NEON_GOLD, (panel.x + 24, legend_y, 12, 12), border_radius=2)
+        reserved_text = self._sub_f.render(f"Reserved: {reserved_count}", True, (220, 225, 235))
+        surface.blit(reserved_text, (panel.x + 42, legend_y - 2))
+        pygame.draw.rect(surface, (52, 110, 78), (panel.x + 180, legend_y, 12, 12), border_radius=2)
+        open_text = self._sub_f.render("Open", True, (220, 225, 235))
+        surface.blit(open_text, (panel.x + 198, legend_y - 2))
+
+        hint = self._sub_f.render("LEFT: summary    RIGHT: seat layout", True, (120, 140, 170))
+        surface.blit(hint, (SCREEN_W - 28 - hint.get_width(), legend_y - 2))
+
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill((11, 14, 23))
+
+        if self._page == 1:
+            self._draw_final_seating(surface)
+            for b in (self.btn_again, self.btn_setup, self.btn_title, self.btn_quit):
+                b.draw(surface)
+            return
 
         hx, hy = 28, 18
         title_surf = self._title_f.render("Simulation Performance Summary", True, (248, 250, 252))
         surface.blit(title_surf, (hx, hy))
+        page_label = self._mono_f.render("PAGE 1 / 2   RIGHT: seat layout", True, (120, 140, 170))
+        surface.blit(page_label, (SCREEN_W - 28 - page_label.get_width(), hy + 5))
 
         pygame.draw.line(surface, (30, 38, 60), (hx, hy + title_surf.get_height() + 8), (SCREEN_W - hx, hy + title_surf.get_height() + 8), 1)
 

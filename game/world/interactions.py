@@ -47,42 +47,42 @@ def build_zones(num_cashiers: int, num_ushers: int, num_servers: int) -> List[Zo
     zones: List[Zone] = []
 
     x, y = _tc(SECURITY_COL, SECURITY_ROW)
-    zones.append(Zone("security", x, y, C_SECURITY, "[E] Security Check"))
+    zones.append(Zone("security", x, y, C_SECURITY, "[SPACE] Security Check"))
 
     x, y = _tc(BOARD_COL, BOARD_ROW)
-    zones.append(Zone("board", x, y, C_WALL_TRIM, "[E] Check Schedule"))
+    zones.append(Zone("board", x, y, C_WALL_TRIM, "[SPACE] Check Schedule"))
 
     x, y = _tc(3, 8)
-    zones.append(Zone("poster", x, y, C_WALL_TRIM, "[E] View Poster"))
+    zones.append(Zone("poster", x, y, C_WALL_TRIM, "[SPACE] View Poster"))
     x, y = _tc(16, 8)
-    zones.append(Zone("poster", x, y, C_WALL_TRIM, "[E] View Poster"))
+    zones.append(Zone("poster", x, y, C_WALL_TRIM, "[SPACE] View Poster"))
     x, y = _tc(16, 21)
-    zones.append(Zone("poster", x, y, C_WALL_TRIM, "[E] View Poster"))
+    zones.append(Zone("poster", x, y, C_WALL_TRIM, "[SPACE] View Poster"))
 
     for i in range(min(num_cashiers, len(CASHIER_DESK_COLS))):
         col = CASHIER_DESK_COLS[i]
         x, y = _tc(col, CASHIER_QUEUE_ROW)
-        zones.append(Zone("cashier", x, y, C_NEON_GOLD, "[E] Buy Ticket"))
+        zones.append(Zone("cashier", x, y, C_NEON_GOLD, "[SPACE] Buy Ticket"))
 
     for i in range(min(num_ushers, len(USHER_DESK_COLS))):
         col = USHER_DESK_COLS[i]
         x, y = _tc(col, USHER_DESK_ROW + 1)
-        zones.append(Zone("usher", x, y, C_NEON_PINK, "[E] Show Ticket"))
+        zones.append(Zone("usher", x, y, C_NEON_PINK, "[SPACE] Show Ticket"))
 
     for i in range(min(num_servers, len(SNACK_DESK_COLS))):
         col = SNACK_DESK_COLS[i]
         x, y = _tc(col, SNACK_DESK_ROW - 1)
-        zones.append(Zone("snack", x, y, C_NEON_CYAN, "[E] Buy Snacks"))
+        zones.append(Zone("snack", x, y, C_NEON_CYAN, "[SPACE] Buy Snacks"))
 
     for row in SEAT_ROWS:
         for col in range(SEAT_COLS[0], SEAT_COLS[-1], 2):
             if tile_at(col, row) == TILE_SEAT:
                 x, y = _tc(col, row)
-                zones.append(Zone("seat", x, y, C_NEON_GOLD, "[E] Take Seat"))
+                zones.append(Zone("seat", x, y, C_NEON_GOLD, "[SPACE] Take Seat"))
 
     exit_col = sum(EXIT_DOOR_COLS) // len(EXIT_DOOR_COLS)
     x, y = _tc(exit_col, EXIT_DOOR_ROW)
-    zones.append(Zone("exit", x, y, C_NEON_RED, "[E] Exit Theater"))
+    zones.append(Zone("exit", x, y, C_NEON_RED, "[SPACE] Exit Theater"))
 
     return zones
 
