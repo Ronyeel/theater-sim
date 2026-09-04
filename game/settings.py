@@ -72,6 +72,14 @@ C_GOOD          = ( 80, 230, 130)
 C_BAD           = (255,  70,  70)
 C_WARN          = (255, 200,  60)
 
+# RPG Dialog System Colors
+C_DIALOG_BG_TOP     = ( 18,  12,  42)
+C_DIALOG_BG_BOT     = ( 30,  18,  58)
+C_DIALOG_BORDER_OUT = (180, 155, 100)
+C_DIALOG_BORDER_IN  = (120, 100,  70)
+C_DIALOG_ORNAMENT   = (255, 215,  90)
+C_CURSOR_ARROW      = (255, 220,  80)
+
 NPC_COLORS = [
     (230, 100, 100),
     (100, 180, 230),

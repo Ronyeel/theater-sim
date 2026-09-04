@@ -12,6 +12,8 @@ from game.settings import (
     SNACK_DESK_COLS, SNACK_DESK_ROW,
     MAP_COLS, MAP_ROWS, TILE_DESK, TILE_SEAT, TILE_SNACK, TILE_USHER,
     TILE_SECURITY, PLAYER_SPAWN,
+    C_DIALOG_BG_TOP, C_DIALOG_BG_BOT, C_DIALOG_BORDER_OUT,
+    C_DIALOG_BORDER_IN, C_DIALOG_ORNAMENT,
 )
 from game.core.camera import Camera
 from game.core.tilemap import TileMap, tile_at
@@ -36,6 +38,203 @@ def _font(name, size, bold=False):
         return pygame.font.SysFont(name, size, bold=bold)
     except Exception:
         return pygame.font.Font(None, size)
+
+
+# ─── RPG-style typewriter message bar ──────────────────────────────
+
+
+# Speaker configs: zone_name -> (label, portrait_color)
+_SPEAKER_CONFIG = {
+    "cashier":  ("CASHIER",    C_NEON_GOLD),
+    "usher":    ("USHER",      C_NEON_PINK),
+    "snack":    ("SNACK BAR",  C_NEON_CYAN),
+    "seat":     ("THEATER",    C_NEON_GREEN),
+    "security": ("SECURITY",   (180, 170, 220)),
+    "exit":     ("EXIT",       C_NEON_GOLD),
+    "system":   ("SYSTEM",     C_TEXT_WHITE),
+    "error":    ("!",          C_NEON_RED),
+}
+
+
+class RPGMessageBar:
+    """
+    RPG-style text box with typewriter reveal, speaker name tag,
+    colored portrait, slide-up animation, and ornamental border.
+    Inspired by Pokémon / Undertale / Stardew Valley dialog.
+    """
+
+    CHARS_PER_SEC = 42  # typewriter speed
+    DISPLAY_TIME  = 4.0
+    BOX_W         = 620
+    BOX_H         = 80
+    PORTRAIT_SIZE = 46
+
+    def __init__(self):
+        self._msg          = ""
+        self._speaker      = "SYSTEM"
+        self._portrait_col = C_TEXT_WHITE
+        self._full_color   = C_TEXT_WHITE
+        self._t            = 0.0        # lifetime timer
+        self._reveal_t     = 0.0        # chars revealed
+        self._slide_t      = 0.0        # slide-in [0..1]
+        self._visible      = False
+
+        self._f_speaker  = _font("consolas", 11, bold=True)
+        self._f_msg      = _font("consolas", 13, bold=True)
+        self._f_hint     = _font("consolas", 10)
+
+    # ── public API ──────────────────────────────────────────────────
+
+    def show(self, msg: str, color=C_TEXT_WHITE, speaker_key: str = "system"):
+        self._msg          = msg
+        self._full_color   = color
+        self._t            = self.DISPLAY_TIME
+        self._reveal_t     = 0.0
+        self._slide_t      = 0.0
+        self._visible      = True
+        label, pc          = _SPEAKER_CONFIG.get(speaker_key, ("SYSTEM", C_TEXT_WHITE))
+        self._speaker      = label
+        self._portrait_col = pc
+
+    def is_visible(self) -> bool:
+        return self._visible
+
+    # ── update / draw ────────────────────────────────────────────────
+
+    def update(self, dt: float):
+        if not self._visible:
+            return
+        self._slide_t = min(1.0, self._slide_t + dt * 6.0)
+        self._reveal_t += self.CHARS_PER_SEC * dt
+        self._t -= dt
+        if self._t <= 0:
+            self._visible = False
+
+    def _draw_gradient(self, surface: pygame.Surface, rect: pygame.Rect,
+                       top, bot, alpha: int):
+        grad = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        for y in range(rect.height):
+            t = y / max(1, rect.height - 1)
+            r = int(top[0] + (bot[0] - top[0]) * t)
+            g = int(top[1] + (bot[1] - top[1]) * t)
+            b = int(top[2] + (bot[2] - top[2]) * t)
+            pygame.draw.line(grad, (r, g, b, alpha), (0, y), (rect.width, y))
+        surface.blit(grad, rect.topleft)
+
+    def _draw_ornamental_border(self, surface: pygame.Surface, rect: pygame.Rect,
+                                accent):
+        x, y, w, h = rect.x, rect.y, rect.width, rect.height
+        pygame.draw.rect(surface, C_DIALOG_BORDER_OUT, rect, 2, border_radius=6)
+        inner = pygame.Rect(x + 4, y + 4, w - 8, h - 8)
+        pygame.draw.rect(surface, accent, inner, 1, border_radius=5)
+        corner = 10
+        for cx, cy, dx, dy in [
+            (x + 2, y + 2,  1,  1), (x + w - 3, y + 2,     -1,  1),
+            (x + 2, y + h - 3,  1, -1), (x + w - 3, y + h - 3, -1, -1),
+        ]:
+            pygame.draw.line(surface, C_DIALOG_ORNAMENT,
+                             (cx, cy), (cx + dx * corner, cy), 2)
+            pygame.draw.line(surface, C_DIALOG_ORNAMENT,
+                             (cx, cy), (cx, cy + dy * corner), 2)
+
+    def draw(self, surface: pygame.Surface):
+        if not self._visible:
+            return
+
+        # Ease slide-up from bottom
+        ease = 1.0 - (1.0 - self._slide_t) ** 3
+        bx = SCREEN_W // 2 - self.BOX_W // 2
+        target_y = SCREEN_H - self.BOX_H - 44
+        start_y  = SCREEN_H + 10
+        by = int(start_y + (target_y - start_y) * ease)
+
+        alpha = int(255 * min(1.0, self._t / 0.5))  # fade out in last 0.5s
+
+        box_rect = pygame.Rect(bx, by, self.BOX_W, self.BOX_H)
+
+        # Background gradient
+        self._draw_gradient(surface, box_rect,
+                            C_DIALOG_BG_TOP, C_DIALOG_BG_BOT, min(240, alpha))
+
+        # Ornamental border
+        self._draw_ornamental_border(surface, box_rect, self._portrait_col)
+
+        # ── Portrait box ────────────────────────────────────────────
+        port_x = bx + 10
+        port_y = by + self.BOX_H // 2 - self.PORTRAIT_SIZE // 2
+        port_rect = pygame.Rect(port_x, port_y,
+                                self.PORTRAIT_SIZE, self.PORTRAIT_SIZE)
+        # Glow behind portrait
+        glow = pygame.Surface((self.PORTRAIT_SIZE + 8, self.PORTRAIT_SIZE + 8),
+                              pygame.SRCALPHA)
+        glow.fill((*self._portrait_col[:3], 40))
+        surface.blit(glow, (port_x - 4, port_y - 4))
+        # Portrait fill
+        pygame.draw.rect(surface, self._portrait_col, port_rect, border_radius=6)
+        pygame.draw.rect(surface, (255, 255, 255), port_rect, 1, border_radius=6)
+        # Speaker initial char in portrait
+        init = self._speaker[0] if self._speaker else "?"
+        init_surf = _font("consolas", 22, bold=True).render(init, True, (20, 15, 40))
+        surface.blit(init_surf, (port_x + self.PORTRAIT_SIZE // 2 - init_surf.get_width() // 2,
+                                  port_y + self.PORTRAIT_SIZE // 2 - init_surf.get_height() // 2))
+
+        # ── Speaker name tag (above box left-side) ───────────────────
+        tag_surf = self._f_speaker.render(self._speaker, True, (20, 15, 40))
+        tag_w = tag_surf.get_width() + 16
+        tag_h = tag_surf.get_height() + 6
+        tag_rect = pygame.Rect(port_x - 2, by - tag_h - 2, tag_w, tag_h)
+        pygame.draw.rect(surface, self._portrait_col, tag_rect, border_radius=4)
+        pygame.draw.rect(surface, (255, 255, 255), tag_rect, 1, border_radius=4)
+        surface.blit(tag_surf, (tag_rect.x + 8, tag_rect.y + 3))
+
+        # ── Typewriter message text ─────────────────────────────────
+        revealed = int(self._reveal_t)
+        display_msg = self._msg[:revealed]
+
+        msg_x = port_x + self.PORTRAIT_SIZE + 14
+        msg_y = by + self.BOX_H // 2 - 10
+
+        # Word-wrap: split into two lines if too long
+        max_chars_line = 52
+        if len(self._msg) > max_chars_line:
+            # Find word boundary
+            split_at = self._msg.rfind(' ', 0, max_chars_line)
+            if split_at < 0:
+                split_at = max_chars_line
+            line1 = self._msg[:split_at]
+            line2 = self._msg[split_at:].strip()
+            reveal1 = display_msg[:split_at]
+            reveal2 = display_msg[split_at:].strip() if len(display_msg) > split_at else ""
+            msg_y = by + self.BOX_H // 2 - 18
+            if reveal1:
+                s1 = self._f_msg.render(reveal1, True, self._full_color)
+                surface.blit(s1, (msg_x, msg_y))
+            if reveal2:
+                s2 = self._f_msg.render(reveal2, True, self._full_color)
+                surface.blit(s2, (msg_x, msg_y + 22))
+        else:
+            msg_surf = self._f_msg.render(display_msg, True, self._full_color)
+            surface.blit(msg_surf, (msg_x, msg_y))
+
+        # Blinking cursor after last char
+        if len(display_msg) >= len(self._msg):
+            cursor_visible = int(pygame.time.get_ticks() / 400) % 2 == 0
+            if cursor_visible:
+                cursor_surf = self._f_msg.render("▌", True, self._portrait_col)
+                cx_off = _font("consolas", 13, bold=True).size(display_msg[-20:] if len(display_msg) > 20 else display_msg)[0]
+                # Just draw at end of visible text
+                test_surf = self._f_msg.render(display_msg if len(self._msg) <= 52 else self._msg[self._msg.rfind(' ', 0, 52):].strip(), True, self._full_color)
+                surface.blit(cursor_surf, (msg_x + test_surf.get_width() + 2,
+                                           msg_y + (22 if len(self._msg) > 52 else 0)))
+
+        # [SPACE] continue hint
+        if len(display_msg) >= len(self._msg) and self._t > 0.6:
+            hint = self._f_hint.render("[SPACE] Continue", True, (100, 90, 130))
+            surface.blit(hint, (bx + self.BOX_W - hint.get_width() - 14,
+                                by + self.BOX_H - hint.get_height() - 8))
+
+
+# ─────────────────────────────────────────────────────────────────────
 
 
 class GameScreen:
@@ -92,16 +291,15 @@ class GameScreen:
         )
 
         self._fading = False
-        self._fade_alpha = 0
+        self._fade_alpha = 0.0
         self._fade_surf = pygame.Surface((SCREEN_W, SCREEN_H))
         self._fade_surf.fill((0, 0, 0))
         self._show_collision_debug = False
 
         self.controlled_player = Player()
         self._player_mode = False
-        self._player_msg = ""
-        self._player_msg_t = 0.0
-        self._player_msg_color = C_TEXT_WHITE
+        self._rpg_bar = RPGMessageBar()
+        self._last_zone_name = "system"
 
         for pos, data in self.simulation.seating.seat_data.items():
             if data.get("customer_name") in ("Player", "Student / Player"):
@@ -265,11 +463,11 @@ class GameScreen:
 
             if self.controlled_player.usher_gate_blocked and not self.controlled_player.ticket_checked:
                 if not self.controlled_player.has_ticket:
-                    self._player_set_msg("GATE BLOCKED: Purchase a ticket at the Cashier first!", C_NEON_RED)
+                    self._player_set_msg("GATE BLOCKED: Purchase a ticket at the Cashier first!", C_NEON_RED, "error")
                 else:
-                    self._player_set_msg("GATE BLOCKED: Present your ticket to an Usher to pass!", C_NEON_RED)
+                    self._player_set_msg("GATE BLOCKED: Present your ticket to an Usher to pass!", C_NEON_RED, "usher")
             elif self.controlled_player.ticket_gate_blocked and not self.controlled_player.ticket_checked:
-                self._player_set_msg("DOOR LOCKED: Ticket must be checked by an Usher first!", C_NEON_RED)
+                self._player_set_msg("DOOR LOCKED: Ticket must be checked by an Usher first!", C_NEON_RED, "usher")
 
             # Centre camera on player with gentle lerp
             target_cx = self.controlled_player.x - SCREEN_W / (2 * self.camera.zoom)
@@ -327,8 +525,7 @@ class GameScreen:
             if self._fade_alpha >= 255:
                 self.go_title()
                 self._fading = False
-        if self._player_msg_t > 0:
-            self._player_msg_t -= dt
+        self._rpg_bar.update(dt)
 
 
     def _on_player_seat_reserved(self, row: int, col: int):
@@ -337,13 +534,11 @@ class GameScreen:
         p.stage = "need_check"
         p.seated_at_pos = (row, col)
         p.flash(C_NEON_GOLD)
-        self._player_set_msg(f"Ticket Purchased (₱250)! Reserved Row {row} Seat {col}. Proceed to Usher gate.", C_NEON_GOLD)
+        self._player_set_msg(f"Ticket Purchased (₱250)! Reserved Row {row} Seat {col}. Proceed to Usher gate.", C_NEON_GOLD, "cashier")
         self.hud.add_log(f"[Box Office] Ticket purchased! Reserved Row {row}, Seat {col}.", C_NEON_GOLD)
 
-    def _player_set_msg(self, msg: str, color=None):
-        self._player_msg = msg
-        self._player_msg_t = 3.5
-        self._player_msg_color = color or C_TEXT_WHITE
+    def _player_set_msg(self, msg: str, color=None, zone: str = "system"):
+        self._rpg_bar.show(msg, color or C_TEXT_WHITE, zone)
 
     def _player_interact(self):
         p = self.controlled_player
@@ -351,7 +546,7 @@ class GameScreen:
         zone = find_nearest_zone(self.zones, p.x, p.y)
 
         if zone is None:
-            self._player_set_msg("Nothing nearby to interact with.", C_TEXT_DIM)
+            self._player_set_msg("Nothing nearby to interact with.", C_TEXT_DIM, "system")
             return
 
         name = zone.name
@@ -359,15 +554,15 @@ class GameScreen:
         if name == "security":
             if p.stage in ("entering", "at_security"):
                 p.stage = "browsing"
-                self._player_set_msg("Security check passed! Please purchase a ticket at the Cashier.", C_NEON_GREEN)
+                self._player_set_msg("Security check passed! Please purchase a ticket at the Cashier.", C_NEON_GREEN, "security")
                 self.hud.add_log("[Player] Passed security checkpoint.", C_NEON_GREEN)
                 p.flash(C_NEON_GREEN)
             else:
-                self._player_set_msg("Security check already completed.", C_TEXT_DIM)
+                self._player_set_msg("Security check already completed.", C_TEXT_DIM, "security")
             return
 
         if name in ("board", "poster"):
-            self._player_set_msg("Now Showing: Starlight Express (Screen 1, 7:30 PM)", C_NEON_CYAN)
+            self._player_set_msg("Now Showing: Starlight Express (Screen 1, 7:30 PM)", C_NEON_CYAN, "system")
             return
 
         if name == "cashier":
@@ -375,7 +570,7 @@ class GameScreen:
             if desk_col in CASHIER_DESK_COLS:
                 idx = CASHIER_DESK_COLS.index(desk_col)
                 if idx >= self._num_cashiers:
-                    self._player_set_msg(f"Cashier #{idx + 1} is CLOSED. Please use an open cashier counter.", C_NEON_RED)
+                    self._player_set_msg(f"Cashier #{idx + 1} is CLOSED. Please use an open cashier counter.", C_NEON_RED, "error")
                     p.flash(C_NEON_RED)
                     return
 
@@ -385,16 +580,16 @@ class GameScreen:
                 and abs(npc.x - zone.x) < 28 and npc.y <= p.y + 12
             ]
             if npcs_in_line:
-                self._player_set_msg("Please wait in line! A customer is being served ahead.", C_NEON_RED)
+                self._player_set_msg("Please wait in line! A customer is being served ahead.", C_NEON_RED, "cashier")
                 p.flash(C_NEON_RED)
                 return
 
             if p.has_ticket and p.seated_at_pos:
-                self._player_set_msg("You already hold a ticket! Head to the Usher gate.", C_TEXT_DIM)
+                self._player_set_msg("You already hold a ticket! Head to the Usher gate.", C_TEXT_DIM, "cashier")
                 return
 
             self.seating_panel.open()
-            self._player_set_msg("Welcome to the Box Office! Select your seat on the chart.", C_NEON_GOLD)
+            self._player_set_msg("Welcome to the Box Office! Select your seat on the chart.", C_NEON_GOLD, "cashier")
             self.hud.add_log("[Box Office] Please select your seat reservation on the chart.", C_NEON_GOLD)
             return
 
@@ -403,7 +598,7 @@ class GameScreen:
             if desk_col in USHER_DESK_COLS:
                 idx = USHER_DESK_COLS.index(desk_col)
                 if idx >= self._num_ushers:
-                    self._player_set_msg(f"Usher Station #{idx + 1} is CLOSED. Please use an active usher station.", C_NEON_RED)
+                    self._player_set_msg(f"Usher Station #{idx + 1} is CLOSED. Please use an active usher station.", C_NEON_RED, "error")
                     p.flash(C_NEON_RED)
                     return
 
@@ -413,23 +608,23 @@ class GameScreen:
                 and abs(npc.x - zone.x) < 28 and npc.y <= p.y + 12
             ]
             if npcs_at_usher:
-                self._player_set_msg("Please wait in line! Another guest is at the Usher station.", C_NEON_RED)
+                self._player_set_msg("Please wait in line! Another guest is at the Usher station.", C_NEON_RED, "usher")
                 p.flash(C_NEON_RED)
                 return
 
             if not p.has_ticket:
-                self._player_set_msg("ACCESS DENIED: You must purchase a ticket from the Cashier first!", C_NEON_RED)
+                self._player_set_msg("ACCESS DENIED: You must purchase a ticket from the Cashier first!", C_NEON_RED, "usher")
                 p.flash(C_NEON_RED)
                 return
 
             if p.ticket_checked:
-                self._player_set_msg("Your ticket is already validated. You may enter the theater.", C_TEXT_DIM)
+                self._player_set_msg("Your ticket is already validated. You may enter the theater.", C_TEXT_DIM, "usher")
                 return
 
             p.ticket_checked = True
             p.stage = "need_seat"
             p.flash(C_NEON_CYAN)
-            self._player_set_msg("Ticket Validated! Usher gate unlocked. Enjoy your movie!", C_NEON_CYAN)
+            self._player_set_msg("Ticket Validated! Usher gate unlocked. Enjoy your movie!", C_NEON_CYAN, "usher")
             self.hud.add_log("[Player] Ticket validated by Usher. Gate opened.", C_NEON_CYAN)
             return
 
@@ -438,7 +633,7 @@ class GameScreen:
             if desk_col in SNACK_DESK_COLS:
                 idx = SNACK_DESK_COLS.index(desk_col)
                 if idx >= self._num_servers:
-                    self._player_set_msg(f"Concession Counter #{idx + 1} is CLOSED. Please use an open counter.", C_NEON_RED)
+                    self._player_set_msg(f"Concession Counter #{idx + 1} is CLOSED. Please use an open counter.", C_NEON_RED, "error")
                     p.flash(C_NEON_RED)
                     return
 
@@ -448,28 +643,28 @@ class GameScreen:
                 and abs(npc.x - zone.x) < 28 and abs(npc.y - zone.y) < 24
             ]
             if npcs_at_snack:
-                self._player_set_msg("Please wait in line! Another customer is ordering at the counter.", C_NEON_RED)
+                self._player_set_msg("Please wait in line! Another customer is ordering at the counter.", C_NEON_RED, "snack")
                 p.flash(C_NEON_RED)
                 return
 
             if not p.ticket_checked:
-                self._player_set_msg("Please validate your ticket with an Usher before buying concessions.", C_NEON_RED)
+                self._player_set_msg("Please validate your ticket with an Usher before buying concessions.", C_NEON_RED, "snack")
                 p.flash(C_NEON_RED)
                 return
 
             if p.has_food:
-                self._player_set_msg("You already purchased Popcorn & Soda!", C_TEXT_DIM)
+                self._player_set_msg("You already purchased Popcorn & Soda!", C_TEXT_DIM, "snack")
                 return
 
             p.has_food = True
             p.flash(C_NEON_CYAN)
-            self._player_set_msg("🍿 Bought Popcorn & Soda! Head inside the auditorium to sit.", C_NEON_CYAN)
+            self._player_set_msg("Bought Popcorn & Soda! Head inside the auditorium to sit.", C_NEON_CYAN, "snack")
             self.hud.add_log("[Player] Purchased Popcorn & Soda at concessions.", C_NEON_CYAN)
             return
 
         if name == "seat":
             if not p.ticket_checked:
-                self._player_set_msg("AUDITORIUM RESTRICTION: Ticket must be validated by an Usher first!", C_NEON_RED)
+                self._player_set_msg("AUDITORIUM RESTRICTION: Ticket must be validated by an Usher first!", C_NEON_RED, "seat")
                 p.flash(C_NEON_RED)
                 return
 
@@ -490,7 +685,7 @@ class GameScreen:
                             chart_pos = (chart_r, chart_c)
 
             if not chart_pos:
-                self._player_set_msg("Please step directly adjacent to a seat to sit down.", C_TEXT_DIM)
+                self._player_set_msg("Please step directly adjacent to a seat to sit down.", C_TEXT_DIM, "seat")
                 return
 
             cr, cc = chart_pos
@@ -505,19 +700,19 @@ class GameScreen:
                 p.y = float(srow * TILE_SIZE + TILE_SIZE // 2)
                 p._direction = 3
                 p.flash(C_NEON_GREEN)
-                self._player_set_msg(f"You sat down in your reserved seat (Row {cr}, Seat {cc}). Enjoy the show!", C_NEON_GREEN)
+                self._player_set_msg(f"You sat down in your reserved seat (Row {cr}, Seat {cc}). Enjoy the show!", C_NEON_GREEN, "seat")
                 self.hud.add_log(f"[Theater] Player seated at Row {cr}, Seat {cc}.", C_NEON_GREEN)
                 return
 
             if p.seated_at_pos is not None:
                 old_r, old_c = p.seated_at_pos
-                self._player_set_msg(f"Your assigned seat is Row {old_r} Seat {old_c}. Please sit in your reserved seat!", C_NEON_RED)
+                self._player_set_msg(f"Your assigned seat is Row {old_r} Seat {old_c}. Please sit in your reserved seat!", C_NEON_RED, "seat")
                 p.flash(C_NEON_RED)
                 return
 
             if seating.chart[cr - 1][cc - 1] == 'X':
                 occupant = info.get("customer_name", "another guest")
-                self._player_set_msg(f"Sorry, Row {cr} Seat {cc} is already taken by {occupant}!", C_NEON_RED)
+                self._player_set_msg(f"Sorry, Row {cr} Seat {cc} is already taken by {occupant}!", C_NEON_RED, "seat")
                 p.flash(C_NEON_RED)
                 return
 
@@ -530,24 +725,24 @@ class GameScreen:
                 p.y = float(srow * TILE_SIZE + TILE_SIZE // 2)
                 p._direction = 3
                 p.flash(C_NEON_GREEN)
-                self._player_set_msg(f"Seat Reserved: Row {cr} Seat {cc}. Enjoy the film!", C_NEON_GREEN)
+                self._player_set_msg(f"Seat Reserved: Row {cr} Seat {cc}. Enjoy the film!", C_NEON_GREEN, "seat")
                 self.hud.add_log(f"[Reservation] Player reserved seat Row {cr}, Seat {cc}.", C_NEON_GREEN)
                 self.seating_panel.bind(seating)
             else:
-                self._player_set_msg(f"Reservation failed: {msg}", C_NEON_RED)
+                self._player_set_msg(f"Reservation failed: {msg}", C_NEON_RED, "error")
                 p.flash(C_NEON_RED)
             return
 
         if name == "exit":
             if p.stage not in ("seated", "need_exit") and not self._movie_finished:
-                self._player_set_msg("Find a seat and watch the movie before exiting!", C_NEON_RED)
+                self._player_set_msg("Find a seat and watch the movie before exiting!", C_NEON_RED, "exit")
                 return
             p.stage = "need_exit"
-            self._player_set_msg("You exited the theater. Thanks for visiting!", C_NEON_GOLD)
+            self._player_set_msg("You exited the theater. Thanks for visiting!", C_NEON_GOLD, "exit")
             self.hud.add_log("[Player] Exited the theater.", C_NEON_GOLD)
             return
 
-        self._player_set_msg(f"Interact: {zone.label or zone.name}", C_TEXT_WHITE)
+        self._player_set_msg(f"Interact: {zone.label or zone.name}", C_TEXT_WHITE, "system")
 
     def _show_final_seating_layout(self):
         seating = self.simulation.seating
@@ -666,13 +861,61 @@ class GameScreen:
             zone = find_nearest_zone(self.zones, self.controlled_player.x, self.controlled_player.y)
             if zone:
                 zsx, zsy = self.camera.world_to_screen(zone.x, zone.y)
-                r = int(18 + 4 * math.sin(self._t * 4))
-                glow = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-                pygame.draw.circle(glow, (*C_NEON_GOLD[:3], 90), (r, r), r)
-                world.blit(glow, (int(zsx) - r, int(zsy) - r))
-                label_f = _font("consolas", 11, bold=True)
-                hint = label_f.render(zone.label or zone.name, True, C_NEON_GOLD)
-                world.blit(hint, (int(zsx) - hint.get_width() // 2, int(zsy) - 28))
+
+                # --- pulsing glow ring ---
+                pulse = 0.55 + 0.45 * math.sin(self._t * 5)
+                r_outer = int(22 + 6 * math.sin(self._t * 4))
+                glow = pygame.Surface((r_outer * 2, r_outer * 2), pygame.SRCALPHA)
+                pygame.draw.circle(glow, (*C_NEON_GOLD[:3], int(70 * pulse)), (r_outer, r_outer), r_outer)
+                pygame.draw.circle(glow, (*C_NEON_GOLD[:3], int(140 * pulse)), (r_outer, r_outer), int(r_outer * 0.55))
+                world.blit(glow, (int(zsx) - r_outer, int(zsy) - r_outer))
+
+                # --- pill badge (drawn on world surface so it scales with camera) ---
+                zone_icons = {
+                    "cashier": "🎟", "usher": "🚪", "snack": "🍿",
+                    "security": "🛡", "seat": "💺", "exit": "🚪",
+                    "board": "📋", "poster": "🎬",
+                }
+                icon = zone_icons.get(zone.name, "✦")
+                zone_lbl = zone.label or zone.name.title()
+
+                lbl_f   = _font("consolas", 10, bold=True)
+                key_f   = _font("consolas", 9,  bold=True)
+
+                lbl_surf = lbl_f.render(f"{icon}  {zone_lbl}", True, (255, 230, 120))
+                key_surf = key_f.render("[E]", True, (20, 14, 40))
+
+                pad_x, pad_y = 8, 4
+                key_badge_w = key_surf.get_width() + 8
+                key_badge_h = key_surf.get_height() + 4
+                total_w = pad_x * 2 + lbl_surf.get_width() + 6 + key_badge_w
+                total_h = max(lbl_surf.get_height(), key_badge_h) + pad_y * 2
+
+                pill_y = int(zsy) - r_outer - total_h - 6
+                pill_x = int(zsx) - total_w // 2
+
+                # shadow
+                shadow = pygame.Surface((total_w + 4, total_h + 4), pygame.SRCALPHA)
+                pygame.draw.rect(shadow, (0, 0, 0, 90), shadow.get_rect(), border_radius=total_h // 2 + 2)
+                world.blit(shadow, (pill_x - 2, pill_y - 1))
+
+                # pill background
+                pill = pygame.Surface((total_w, total_h), pygame.SRCALPHA)
+                pygame.draw.rect(pill, (18, 14, 38, 230), pill.get_rect(), border_radius=total_h // 2)
+                pygame.draw.rect(pill, (*C_NEON_GOLD[:3], 200), pill.get_rect(), 1, border_radius=total_h // 2)
+                world.blit(pill, (pill_x, pill_y))
+
+                # label text
+                cy = pill_y + (total_h - lbl_surf.get_height()) // 2
+                world.blit(lbl_surf, (pill_x + pad_x, cy))
+
+                # [E] key chip
+                kx = pill_x + total_w - pad_x - key_badge_w
+                ky = pill_y + (total_h - key_badge_h) // 2
+                key_chip = pygame.Surface((key_badge_w, key_badge_h), pygame.SRCALPHA)
+                pygame.draw.rect(key_chip, (*C_NEON_GOLD[:3], 230), key_chip.get_rect(), border_radius=3)
+                key_chip.blit(key_surf, (4, 2))
+                world.blit(key_chip, (kx, ky))
 
         if self._show_collision_debug:
             self._draw_collision_debug(world)
@@ -696,18 +939,8 @@ class GameScreen:
         self.simulation_panel.draw(surface)
         self.seating_panel.draw(surface)
 
-        if self._player_mode and self._player_msg_t > 0 and self._player_msg:
-            msg_font = _font("consolas", 12, bold=True)
-            msg_surf = msg_font.render(self._player_msg, True, self._player_msg_color)
-            mw = msg_surf.get_width() + 24
-            mh = 30
-            mx = SCREEN_W // 2 - mw // 2
-            my = SCREEN_H - 56
-            m_panel = pygame.Surface((mw, mh), pygame.SRCALPHA)
-            m_panel.fill((10, 14, 28, 220))
-            surface.blit(m_panel, (mx, my))
-            pygame.draw.rect(surface, self._player_msg_color, pygame.Rect(mx, my, mw, mh), 1, border_radius=4)
-            surface.blit(msg_surf, (mx + 12, my + 7))
+        if self._player_mode:
+            self._rpg_bar.draw(surface)
 
         if not self.simulation.is_running:
             rect = self._finish_banner_rect
